@@ -1,4 +1,4 @@
-# 📚 Lec2Notes: RAG-Powered Lecture Summaries
+# AutoNoteGenerator
 
 Transform your lecture transcripts into organized, readable, and exportable study material with the power of **Retrieval-Augmented Generation (RAG)**.
 
