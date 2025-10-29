@@ -1,3 +1,6 @@
 .env.txt
 __pycache__/
 temp.pdf
+.vscode/
+.idea/
+.DS_Store
