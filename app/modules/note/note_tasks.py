@@ -84,9 +84,6 @@ class NoteTaskManager:
                 if status == "start":
                     if isinstance(title, str):
                         state.message = f"正在生成：{title}"
-                    if isinstance(index, int) and total_sections:
-                        completed = max(index - 1, 0)
-                        state.progress = max(state.progress, (completed / total_sections) * 100.0)
                 elif status == "complete":
                     if isinstance(index, int) and total_sections:
                         state.progress = max(

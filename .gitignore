@@ -2,6 +2,7 @@
 __pycache__/
 temp.pdf
 .vscode/
+.vectors/
 .idea/
 .DS_Store
 frontend.log

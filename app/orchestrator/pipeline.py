@@ -118,6 +118,7 @@ class CourseSessionPipeline:
         self.note_generator = NoteGenerator(
             chunk_size=settings.rag.chunk.max_tokens,
             chunk_overlap=settings.rag.chunk.overlap,
+            max_workers=settings.rag.note_max_workers,
         )
         self.cards_generator = KnowledgeCardGenerator()
         self.mock_generator = MockExamGenerator()
@@ -199,7 +200,7 @@ class CourseSessionPipeline:
                 "course_session_id": self.session_id,
                 "style_detail": detail_level,
                 "style_difficulty": difficulty,
-                "content_md": json.dumps(note_doc.sections, ensure_ascii=False),
+                "content_md": json.dumps([s.model_dump() for s in note_doc.sections], ensure_ascii=False),
                 "toc_json": json.dumps(note_doc.toc, ensure_ascii=False),
             },
         )

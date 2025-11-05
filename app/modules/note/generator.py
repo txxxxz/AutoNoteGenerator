@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Dict, List, Optional, Tuple
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -25,9 +26,10 @@ from app.utils.logger import logger
 
 
 class NoteGenerator:
-    def __init__(self, chunk_size: int = 500, chunk_overlap: int = 50):
+    def __init__(self, chunk_size: int = 500, chunk_overlap: int = 50, max_workers: int = 3):
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
+        self.max_workers = max(1, max_workers)
 
     def _build_documents(self, layout_doc: LayoutDoc) -> List[Document]:
         documents: List[Document] = []
@@ -72,7 +74,6 @@ class NoteGenerator:
         style_instructions = build_style_instructions(detail_level, difficulty)
         docs = self._build_documents(layout_doc)
         vector_store = load_or_create(session_id, docs)
-        llm = get_llm(temperature=0.2)
         system_prompt = (
             "You are StudyCompanion, tasked with generating structured course notes. "
             "You must adhere to the provided outline, respect the style instructions, "
@@ -81,10 +82,23 @@ class NoteGenerator:
         total_sections = len(outline.root.children)
         if progress_callback:
             progress_callback({"phase": "sections_total", "total": total_sections})
-        sections: List[NoteSection] = []
         figures_by_page, equations_by_page = self._collect_assets(layout_doc)
+        if total_sections == 0:
+            save(session_id, vector_store)
+            return NoteDoc(
+                style={"detail_level": detail_level, "difficulty": difficulty},
+                toc=[],
+                sections=[],
+            )
 
+        section_jobs: List[Tuple[int, OutlineNode, str, str]] = []
         for index, section in enumerate(outline.root.children, start=1):
+            context_text = self._retrieve_context(vector_store, section, docs)
+            prompt = self._build_prompt(section, style_instructions, context_text)
+            section_jobs.append((index, section, prompt, context_text))
+
+        def render_section(job: Tuple[int, OutlineNode, str, str]) -> Tuple[int, NoteSection]:
+            index, section, prompt, context_text = job
             if progress_callback:
                 progress_callback(
                     {
@@ -95,8 +109,7 @@ class NoteGenerator:
                         "title": section.title,
                     }
                 )
-            context_text = self._retrieve_context(vector_store, section, docs)
-            prompt = self._build_prompt(section, style_instructions, context_text)
+            llm = get_llm(temperature=0.2)
             try:
                 response = llm.invoke(
                     [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
@@ -107,15 +120,13 @@ class NoteGenerator:
                 markdown = self._fallback_section(section, context_text)
             figures = self._resolve_figures(section, figures_by_page)
             equations = self._resolve_equations(section, equations_by_page)
-            sections.append(
-                NoteSection(
-                    section_id=section.section_id,
-                    title=section.title,
-                    body_md=markdown.strip(),
-                    figures=figures,
-                    equations=equations,
-                    refs=[f"anchor:{section.section_id}@page{a.page}#{a.ref}" for a in section.anchors],
-                )
+            note_section = NoteSection(
+                section_id=section.section_id,
+                title=section.title,
+                body_md=markdown.strip(),
+                figures=figures,
+                equations=equations,
+                refs=[f"anchor:{section.section_id}@page{a.page}#{a.ref}" for a in section.anchors],
             )
             if progress_callback:
                 progress_callback(
@@ -127,6 +138,23 @@ class NoteGenerator:
                         "title": section.title,
                     }
                 )
+            return index, note_section
+
+        sections_map: Dict[int, NoteSection] = {}
+        max_workers = min(self.max_workers, total_sections) or 1
+
+        if max_workers == 1:
+            for job in section_jobs:
+                index, note_section = render_section(job)
+                sections_map[index] = note_section
+        else:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [executor.submit(render_section, job) for job in section_jobs]
+                for future in as_completed(futures):
+                    index, note_section = future.result()
+                    sections_map[index] = note_section
+
+        sections = [sections_map[index] for index in sorted(sections_map)]
         save(session_id, vector_store)
         toc = [{"section_id": section.section_id, "title": section.title} for section in outline.root.children]
         return NoteDoc(

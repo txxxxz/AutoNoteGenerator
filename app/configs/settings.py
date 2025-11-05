@@ -75,6 +75,7 @@ class RAGChunkConfig:
 @dataclass(slots=True)
 class RAGConfig:
     chunk: RAGChunkConfig = field(default_factory=RAGChunkConfig)
+    note_max_workers: int = 3
 
 
 @dataclass(slots=True)
@@ -92,6 +93,7 @@ class Settings:
             with open(path_to_use, "r", encoding="utf-8") as fh:
                 data = yaml.safe_load(fh) or {}
         merged = _apply_env_overrides(data)
+        rag_data = merged.get("rag", {})
         return cls(
             limits=LimitsConfig(**merged.get("limits", {})),
             notes=NotesConfig(**merged.get("notes", {})),
@@ -101,7 +103,8 @@ class Settings:
                 md_math_block=merged.get("export", {}).get("md", {}).get("math_block", True),
             ),
             rag=RAGConfig(
-                chunk=RAGChunkConfig(**merged.get("rag", {}).get("chunk", {})),
+                chunk=RAGChunkConfig(**rag_data.get("chunk", {})),
+                note_max_workers=int(rag_data.get("note_max_workers", 3)),
             ),
         )
 
