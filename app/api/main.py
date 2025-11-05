@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 
 from app.orchestrator.pipeline import CourseSessionManager, CourseSessionPipeline
 from app.schemas.api import (
@@ -18,6 +21,8 @@ from app.schemas.api import (
     SessionDetail,
     SessionListResponse,
     SessionSummary,
+    NoteTaskResponse,
+    NoteTaskStatus,
 )
 from app.schemas.common import (
     ExportResponse,
@@ -34,6 +39,7 @@ from app.storage import uploads
 from app.storage.repository import repository
 from app.modules.exporter.export_service import ExportService
 from app.modules.qa.qa_service import QAService
+from app.modules.note.note_tasks import note_task_manager, submit_note_generation_task
 from app.configs.settings import settings
 from app.utils.logger import logger
 
@@ -130,9 +136,8 @@ def build_outline(request: OutlineRequest):
         raise HTTPException(status_code=500, detail=f"大纲生成失败: {exc}") from exc
 
 
-@app.post("/api/v1/notes/generate")
+@app.post("/api/v1/notes/generate", response_model=NoteTaskResponse)
 def generate_notes(request: NotesRequest):
-    pipeline = get_pipeline(request.session_id)
     style = request.style
     detail = style.get("detail_level")
     difficulty = style.get("difficulty")
@@ -145,11 +150,45 @@ def generate_notes(request: NotesRequest):
         difficulty,
     )
     try:
-        note_id, note_doc = pipeline.generate_notes(detail, difficulty)
+        task_id = submit_note_generation_task(request.session_id, detail, difficulty)
     except Exception as exc:
         logger.exception("生成笔记失败: session_id=%s 错误=%s", request.session_id, exc)
         raise HTTPException(status_code=500, detail=f"生成笔记失败: {exc}") from exc
-    return {"note_doc_id": note_id, "note_doc": note_doc}
+    return NoteTaskResponse(task_id=task_id)
+
+
+@app.get("/api/v1/notes/tasks/{task_id}", response_model=NoteTaskStatus)
+def get_note_task(task_id: str):
+    snapshot = note_task_manager.snapshot(task_id, include_result=True)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="note generation task not found")
+    return snapshot
+
+
+@app.get("/api/v1/notes/tasks/{task_id}/stream")
+async def stream_note_task(task_id: str):
+    queue = note_task_manager.event_queue(task_id)
+    if queue is None:
+        raise HTTPException(status_code=404, detail="note generation task not found")
+
+    async def event_generator():
+        initial = note_task_manager.snapshot(task_id, include_result=True, for_json=True)
+        if initial:
+            yield _format_sse(initial)
+            if initial.get("status") in {"completed", "failed"}:
+                return
+        loop = asyncio.get_running_loop()
+        while True:
+            event = await loop.run_in_executor(None, queue.get)
+            yield _format_sse(event)
+            if event.get("status") in {"completed", "failed"}:
+                break
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+    }
+    return StreamingResponse(event_generator(), media_type="text/event-stream", headers=headers)
 
 
 @app.post("/api/v1/cards/generate")
@@ -264,6 +303,10 @@ def _latest_mock(session_id: str) -> MockPaper | None:
     if not artifacts:
         return None
     return MockPaper(**artifacts[-1][1])
+
+
+def _format_sse(payload: dict) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 @app.get("/api/v1/notes/{note_doc_id}", response_model=NoteDoc)

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import {
@@ -12,9 +12,17 @@ import {
   generateMindmap,
   generateMock,
   generateNotes,
-  getSessionDetail
+  getSessionDetail,
+  openNoteTaskStream
 } from '../../api/routes';
-import { KnowledgeCards, MindmapGraph, MockPaper, NoteDoc, SessionDetail } from '../../api/types';
+import {
+  KnowledgeCards,
+  MindmapGraph,
+  MockPaper,
+  NoteDoc,
+  NoteTaskStatus,
+  SessionDetail
+} from '../../api/types';
 import ContentSection from '../../components/ContentBlock/NoteSectionView';
 import ExportModal from '../../components/ExportModal';
 import HistoryBar from '../../components/HistoryBar';
@@ -69,6 +77,7 @@ const SessionWorkspacePage = () => {
   const setGenerationState = useSessionState((state) => state.setGenerationState);
   const initialiseSession = useSessionState((state) => state.initialiseSession);
   const { pendingSection, startRegen, finishRegen } = useSectionRegen();
+  const taskSourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -115,6 +124,15 @@ const SessionWorkspacePage = () => {
     void load();
   }, [sessionId]);
 
+  useEffect(() => {
+    return () => {
+      if (taskSourceRef.current) {
+        taskSourceRef.current.close();
+        taskSourceRef.current = null;
+      }
+    };
+  }, []);
+
   const noteDoc: NoteDoc | undefined = session?.noteDoc;
   const cards: KnowledgeCards | undefined = session?.cards;
   const mock: MockPaper | undefined = session?.mock;
@@ -131,36 +149,161 @@ const SessionWorkspacePage = () => {
 
   const { activeId, setActiveId } = useScrollSync(tocItems.map((item) => item.id));
 
+  const handleTaskFailure = (errorMessage?: string | null) => {
+    if (!sessionId) return;
+    setGenerationState(sessionId, {
+      generating: false,
+      progressLabel: undefined,
+      progressValue: 0,
+      taskId: undefined,
+      currentSection: undefined
+    });
+    finishRegen();
+    setMessage(errorMessage ? `生成失败：${errorMessage}` : '生成失败');
+  };
+
+  const handleTaskSuccess = async (status: NoteTaskStatus) => {
+    if (!sessionId) return;
+    const noteDocId = status.note_doc_id;
+    let notePayload = status.note_doc ?? undefined;
+    try {
+      if (!noteDocId) {
+        throw new Error('任务完成但未返回笔记标识');
+      }
+      if (!notePayload) {
+        notePayload = await fetchNoteDoc(noteDocId);
+      }
+      const detail = notePayload.style.detail_level as DetailLevel;
+      const difficulty = (notePayload.style.difficulty ?? 'explanatory') as keyof typeof difficultyToExpression;
+      const expression = difficultyToExpression[difficulty] ?? expressionLevel;
+      setNote(sessionId, noteDocId, notePayload, detail, expression);
+      setMessage('笔记生成完成。');
+
+      const needsExtras = templates.cards || templates.mock || templates.mindmap;
+      setGenerationState(sessionId, {
+        generating: needsExtras,
+        progressLabel: needsExtras ? '笔记生成完成，正在生成附加内容…' : undefined,
+        progressValue: 100,
+        taskId: undefined,
+        currentSection: undefined
+      });
+
+      if (!needsExtras) {
+        finishRegen();
+        return;
+      }
+
+      try {
+        if (templates.cards) {
+          setGenerationState(sessionId, { progressLabel: '正在生成知识卡片…' });
+          const { cards_id, cards: cardsDoc } = await generateCards(sessionId, noteDocId);
+          setCards(sessionId, cards_id, cardsDoc);
+        }
+        if (templates.mock) {
+          setGenerationState(sessionId, { progressLabel: '正在生成模拟试题…' });
+          const { paper_id, paper } = await generateMock(sessionId, noteDocId, 'full', 10, 'mid');
+          setMock(sessionId, paper_id, paper);
+        }
+        if (templates.mindmap) {
+          setGenerationState(sessionId, { progressLabel: '正在生成思维导图…' });
+          const { graph_id, graph } = await generateMindmap(sessionId, `outline_${sessionId}`);
+          setMindmap(sessionId, graph_id, graph);
+        }
+        setMessage('生成完成。');
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : '附加内容生成失败';
+        setMessage(reason);
+      } finally {
+        setGenerationState(sessionId, {
+          generating: false,
+          progressLabel: undefined,
+          progressValue: 100,
+          currentSection: undefined,
+          taskId: undefined
+        });
+        finishRegen();
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : '笔记结果获取失败';
+      handleTaskFailure(reason);
+    }
+  };
+
   const handleGenerate = async () => {
     if (!sessionId) return;
     setMessage(null);
-    setGenerationState(sessionId, { generating: true, progressLabel: '生成中…' });
+    if (taskSourceRef.current) {
+      taskSourceRef.current.close();
+      taskSourceRef.current = null;
+    }
+    setGenerationState(sessionId, {
+      generating: true,
+      progressLabel: '任务排队中…',
+      progressValue: 0,
+      currentSection: undefined,
+      taskId: undefined
+    });
     try {
-      const { note_doc_id, note_doc } = await generateNotes(
+      const { task_id } = await generateNotes(
         sessionId,
         `outline_${sessionId}`,
         detailLevel,
         expressionToDifficulty[expressionLevel]
       );
-      setNote(sessionId, note_doc_id, note_doc, detailLevel, expressionLevel);
-      if (templates.cards) {
-        const { cards_id, cards: cardsDoc } = await generateCards(sessionId, note_doc_id);
-        setCards(sessionId, cards_id, cardsDoc);
-      }
-      if (templates.mock) {
-        const { paper_id, paper } = await generateMock(sessionId, note_doc_id, 'full', 10, 'mid');
-        setMock(sessionId, paper_id, paper);
-      }
-      if (templates.mindmap) {
-        const { graph_id, graph } = await generateMindmap(sessionId, `outline_${sessionId}`);
-        setMindmap(sessionId, graph_id, graph);
-      }
-      setMessage('生成完成。');
+      setGenerationState(sessionId, {
+        generating: true,
+        progressLabel: '任务已创建，等待执行…',
+        progressValue: 0,
+        currentSection: undefined,
+        taskId: task_id
+      });
+      const source = openNoteTaskStream(task_id);
+      taskSourceRef.current = source;
+      source.onmessage = (event) => {
+        try {
+          const data: NoteTaskStatus = JSON.parse(event.data);
+          const progressValue =
+            typeof data.progress === 'number' && Number.isFinite(data.progress)
+              ? Math.min(Math.max(data.progress, 0), 100)
+              : 0;
+          const label =
+            data.message ??
+            (data.current_section
+              ? `正在处理：${data.current_section}`
+              : data.status === 'queued'
+              ? '任务排队中…'
+              : '生成中…');
+          const isActive = data.status === 'running' || data.status === 'queued';
+          setGenerationState(sessionId, {
+            generating: isActive,
+            progressLabel: label,
+            progressValue,
+            currentSection: data.current_section ?? undefined,
+            taskId: data.status === 'completed' || data.status === 'failed' ? undefined : task_id
+          });
+          if (data.status === 'completed') {
+            source.close();
+            taskSourceRef.current = null;
+            void handleTaskSuccess(data);
+          } else if (data.status === 'failed') {
+            source.close();
+            taskSourceRef.current = null;
+            handleTaskFailure(data.error);
+          }
+        } catch (error) {
+          source.close();
+          taskSourceRef.current = null;
+          handleTaskFailure('进度解析失败');
+        }
+      };
+      source.onerror = () => {
+        source.close();
+        taskSourceRef.current = null;
+        handleTaskFailure('进度推送中断');
+      };
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '生成失败');
-    } finally {
-      setGenerationState(sessionId, { generating: false, progressLabel: undefined });
-      finishRegen();
+      const reason = error instanceof Error ? error.message : '任务创建失败';
+      handleTaskFailure(reason);
     }
   };
 
@@ -240,6 +383,8 @@ const SessionWorkspacePage = () => {
   }
 
   const historyItems: HistoryEntry[] = session?.noteHistory ?? [];
+  const showProgress = Boolean(session?.progressLabel);
+  const progressValue = Math.min(Math.max(session?.progressValue ?? 0, 0), 100);
 
   return (
     <div className="workspace">
@@ -254,6 +399,12 @@ const SessionWorkspacePage = () => {
           <button onClick={() => setExportOpen(true)}>导出</button>
         </div>
       </header>
+      {showProgress && (
+        <div className="workspace__progress" role="status">
+          <div className="workspace__progress-text">{session?.progressLabel}</div>
+          <progress value={progressValue} max={100} />
+        </div>
+      )}
       {message && <div className="workspace__message">{message}</div>}
       <main className="workspace__body">
         <aside className="workspace__toc">

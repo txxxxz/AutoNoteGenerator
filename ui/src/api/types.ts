@@ -79,6 +79,27 @@ export interface NoteDoc {
   sections: NoteSection[];
 }
 
+export interface NoteTaskResponse {
+  task_id: string;
+}
+
+export type NoteTaskState = 'queued' | 'running' | 'completed' | 'failed';
+
+export interface NoteTaskStatus {
+  task_id: string;
+  session_id: string;
+  status: NoteTaskState;
+  progress: number;
+  detail_level: string;
+  difficulty: string;
+  total_sections: number;
+  current_section?: string | null;
+  message?: string | null;
+  note_doc_id?: string | null;
+  note_doc?: NoteDoc | null;
+  error?: string | null;
+}
+
 export interface CardsPayload {
   concept: string;
   definition: string;

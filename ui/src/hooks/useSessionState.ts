@@ -28,6 +28,8 @@ type SessionData = {
   uploading?: boolean;
   progressLabel?: string;
   progressValue?: number;
+  taskId?: string;
+  currentSection?: string;
 };
 
 type SessionStore = {

@@ -4,6 +4,8 @@ import {
   CardsPayload,
   KnowledgeCards,
   LayoutDoc,
+  NoteTaskResponse,
+  NoteTaskStatus,
   MindmapGraph,
   MockPaper,
   NoteDoc,
@@ -69,8 +71,16 @@ export const generateNotes = async (
       difficulty
     }
   });
-  return response.data as { note_doc_id: string; note_doc: NoteDoc };
+  return response.data as NoteTaskResponse;
 };
+
+export const getNoteTaskStatus = async (taskId: string) => {
+  const response = await client.get(`/notes/tasks/${taskId}`);
+  return response.data as NoteTaskStatus;
+};
+
+export const openNoteTaskStream = (taskId: string) =>
+  new EventSource(`/api/v1/notes/tasks/${taskId}/stream`);
 
 export const generateCards = async (sessionId: string, noteDocId: string) => {
   const response = await client.post('/cards/generate', {

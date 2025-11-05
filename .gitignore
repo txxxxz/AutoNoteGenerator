@@ -4,13 +4,5 @@ temp.pdf
 .vscode/
 .idea/
 .DS_Store
-ui/node_modules/
-ui/dist/
-uploads/
-assets/
-.vectors/
-exports/
+frontend.log
 backend.log
-study_companion.db
-lectureslides.db
-note.db

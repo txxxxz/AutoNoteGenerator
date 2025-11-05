@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from typing import Callable, Optional
 
 from app.configs.settings import settings
 from app.modules.chunk_outline.outline_builder import OutlineBuilder
@@ -154,18 +155,41 @@ class CourseSessionPipeline:
         self.manager.update_status(self.session_id, "OUTLINE_READY")
         return outline
 
-    def generate_notes(self, detail_level: str, difficulty: str) -> tuple[str, NoteDoc]:
+    def generate_notes(
+        self,
+        detail_level: str,
+        difficulty: str,
+        progress_callback: Optional[Callable[[dict], None]] = None,
+    ) -> tuple[str, NoteDoc]:
+        if progress_callback:
+            progress_callback({"phase": "prepare", "message": "加载解析数据…"})
         outline = self._load_outline()
         layout = self._load_layout()
+        if progress_callback:
+            progress_callback(
+                {
+                    "phase": "prepare",
+                    "message": f"共 {len(outline.root.children)} 个章节待生成…",
+                }
+            )
         logger.info(
             "调用笔记生成器: session_id=%s detail=%s difficulty=%s",
             self.session_id,
             detail_level,
             difficulty,
         )
+        if progress_callback:
+            progress_callback({"phase": "prepare", "message": "构建章节内容…"})
         note_doc = self.note_generator.generate(
-            self.session_id, outline, layout, detail_level, difficulty
+            self.session_id,
+            outline,
+            layout,
+            detail_level,
+            difficulty,
+            progress_callback=progress_callback,
         )
+        if progress_callback:
+            progress_callback({"phase": "save", "message": "整理并保存生成结果…"})
         note_id = f"note_{self.session_id}_{detail_level}_{difficulty}"
         repository.save_artifact(self.session_id, "note_doc", note_doc.model_dump(), artifact_id=note_id)
         notes_db.upsert(

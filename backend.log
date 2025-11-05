@@ -1,0 +1,11 @@
+INFO:     Will watch for changes in these directories: ['/Users/txxxxz/Desktop/StarOrbit/NLP/Lec2Notes-RAG']
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [59785] using WatchFiles
+/Users/txxxxz/anaconda3/envs/note-gen/lib/python3.10/site-packages/google/api_core/_python_version_support.py:266: FutureWarning: You are using a Python version (3.10.19) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2026-10-04). Please upgrade to the latest Python version, or at least Python 3.11, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+2025-11-05 20:32:58,310 | INFO | study_companion | 数据库初始化完成: db/lectureslides.db
+2025-11-05 20:32:58,311 | INFO | study_companion | 数据库初始化完成: db/note.db
+INFO:     Started server process [59787]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:59190 - "GET /api/v1/sessions HTTP/1.1" 200 OK

@@ -5,6 +5,8 @@ from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from app.schemas.common import NoteDoc
+
 
 class FileType(str, Enum):
     pptx = "pptx"
@@ -42,6 +44,25 @@ class NotesRequest(BaseModel):
     outline_tree_id: str
     style: Dict[str, str]
     session_id: str
+
+
+class NoteTaskResponse(BaseModel):
+    task_id: str
+
+
+class NoteTaskStatus(BaseModel):
+    task_id: str
+    session_id: str
+    status: Literal["queued", "running", "completed", "failed"]
+    progress: float = 0.0
+    detail_level: str
+    difficulty: str
+    total_sections: int = 0
+    current_section: Optional[str] = None
+    message: Optional[str] = None
+    note_doc_id: Optional[str] = None
+    note_doc: Optional[NoteDoc] = None
+    error: Optional[str] = None
 
 
 class CardsRequest(BaseModel):

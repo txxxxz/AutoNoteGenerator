@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_text_splitters import TokenTextSplitter
@@ -67,6 +67,7 @@ class NoteGenerator:
         layout_doc: LayoutDoc,
         detail_level: str,
         difficulty: str,
+        progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
     ) -> NoteDoc:
         style_instructions = build_style_instructions(detail_level, difficulty)
         docs = self._build_documents(layout_doc)
@@ -77,10 +78,23 @@ class NoteGenerator:
             "You must adhere to the provided outline, respect the style instructions, "
             "and reference the supplied context. Output in GitHub-flavoured Markdown."
         )
+        total_sections = len(outline.root.children)
+        if progress_callback:
+            progress_callback({"phase": "sections_total", "total": total_sections})
         sections: List[NoteSection] = []
         figures_by_page, equations_by_page = self._collect_assets(layout_doc)
 
-        for section in outline.root.children:
+        for index, section in enumerate(outline.root.children, start=1):
+            if progress_callback:
+                progress_callback(
+                    {
+                        "phase": "section",
+                        "status": "start",
+                        "index": index,
+                        "total": total_sections,
+                        "title": section.title,
+                    }
+                )
             context_text = self._retrieve_context(vector_store, section, docs)
             prompt = self._build_prompt(section, style_instructions, context_text)
             try:
@@ -103,6 +117,16 @@ class NoteGenerator:
                     refs=[f"anchor:{section.section_id}@page{a.page}#{a.ref}" for a in section.anchors],
                 )
             )
+            if progress_callback:
+                progress_callback(
+                    {
+                        "phase": "section",
+                        "status": "complete",
+                        "index": index,
+                        "total": total_sections,
+                        "title": section.title,
+                    }
+                )
         save(session_id, vector_store)
         toc = [{"section_id": section.section_id, "title": section.title} for section in outline.root.children]
         return NoteDoc(
