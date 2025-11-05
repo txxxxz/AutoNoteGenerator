@@ -1,0 +1,31 @@
+.uploader-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.uploader-dropzone {
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  padding: var(--space-8);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+  color: var(--color-text-secondary);
+}
+
+.uploader-dropzone.dragging {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.uploader-hint {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.uploader-error {
+  color: var(--color-danger);
+  font-size: 0.875rem;
+}

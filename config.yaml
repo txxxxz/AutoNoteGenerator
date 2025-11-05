@@ -1,0 +1,16 @@
+limits:
+  max_pages: 200
+  max_file_mb: 100
+notes:
+  default_detail: medium
+  default_difficulty: explanatory
+export:
+  pdf:
+    header: true
+    toc: true
+  md:
+    math_block: true
+rag:
+  chunk:
+    max_tokens: 500
+    overlap: 50

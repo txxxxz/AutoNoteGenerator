@@ -1,0 +1,46 @@
+.toc-container {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  height: 100%;
+  overflow-y: auto;
+}
+
+.toc-item {
+  width: 100%;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.toc-item:hover,
+.toc-item.active {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.toc-item.level-1 {
+  font-weight: 600;
+}
+
+.toc-item.level-2 {
+  padding-left: var(--space-4);
+}
+
+.toc-item.level-3 {
+  padding-left: var(--space-5);
+}
+
+.toc-empty {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  text-align: center;
+  padding: var(--space-4) 0;
+}

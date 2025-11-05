@@ -1,0 +1,147 @@
+export interface SlideBlock {
+  id: string;
+  type: 'title' | 'text' | 'image' | 'formula' | 'table';
+  order: number;
+  bbox?: number[];
+  raw_text?: string;
+  asset_uri?: string;
+  latex?: string;
+}
+
+export interface SlidePage {
+  page_no: number;
+  blocks: SlideBlock[];
+}
+
+export interface ParseResponse {
+  doc_meta: { title: string; pages: number };
+  slides: SlidePage[];
+}
+
+export interface LayoutElement {
+  ref: string;
+  kind: 'title' | 'text' | 'image' | 'formula' | 'table';
+  content?: string;
+  image_uri?: string;
+  latex?: string;
+  caption?: string;
+}
+
+export interface LayoutPage {
+  page_no: number;
+  elements: LayoutElement[];
+}
+
+export interface LayoutDoc {
+  pages: LayoutPage[];
+}
+
+export interface AnchorRef {
+  page: number;
+  ref: string;
+}
+
+export interface OutlineNode {
+  section_id: string;
+  title: string;
+  summary: string;
+  anchors: AnchorRef[];
+  children: OutlineNode[];
+  level: number;
+}
+
+export interface OutlineTree {
+  root: OutlineNode;
+}
+
+export interface NoteFigure {
+  image_uri: string;
+  caption: string;
+}
+
+export interface NoteEquation {
+  latex: string;
+  caption: string;
+}
+
+export interface NoteSection {
+  section_id: string;
+  title: string;
+  body_md: string;
+  figures: NoteFigure[];
+  equations: NoteEquation[];
+  refs: string[];
+}
+
+export interface NoteDoc {
+  style: { detail_level: string; difficulty: string };
+  toc: { section_id: string; title: string }[];
+  sections: NoteSection[];
+}
+
+export interface CardsPayload {
+  concept: string;
+  definition: string;
+  exam_points: string[];
+  example_q?: {
+    stem: string;
+    answer: string;
+    key_points?: string[];
+  } | null;
+  anchors: string[];
+}
+
+export interface KnowledgeCards {
+  cards: CardsPayload[];
+}
+
+export interface MockQuestion {
+  id: string;
+  type: 'mcq' | 'fill' | 'short';
+  stem: string;
+  options?: string[];
+  answer: string;
+  explain?: string | null;
+  key_points?: string[] | null;
+  refs: string[];
+}
+
+export interface MockPaper {
+  meta: {
+    mode: 'chapter' | 'full';
+    size: number;
+    difficulty: 'low' | 'mid' | 'high';
+  };
+  items: MockQuestion[];
+}
+
+export interface MindmapGraph {
+  nodes: { id: string; label: string; level: number }[];
+  edges: { from: string; to: string; type: string }[];
+}
+
+export interface ExportResponse {
+  download_url: string;
+  filename: string;
+}
+
+export interface QAResponse {
+  answer: string;
+  refs: string[];
+}
+
+export interface SessionSummary {
+  id: string;
+  title: string;
+  status: string;
+  created_at: string;
+  file_id: string;
+  note_doc_ids: string[];
+  cards_ids: string[];
+  mock_ids: string[];
+  mindmap_ids: string[];
+}
+
+export interface SessionDetail extends SessionSummary {
+  available_artifacts: Record<string, string[]>;
+}
