@@ -425,6 +425,40 @@ style:
 - 仅在**当前课程会话**内检索与作答；返回 `refs` 以便定位材料来源。
    **验收**：随机抽样问答的引用命中率 ≥ 90%。
 
+### 3.8 会话删除（Session Delete）
+
+**目标**：允许用户彻底删除历史会话并清理所有关联数据，降低磁盘占用并保障隐私。
+
+**输入**：`session_id`（`DELETE /api/v1/sessions/{session_id}`）
+
+**流程**
+
+1. 验证：会话存在且当前无运行中的生成任务（必要时阻塞或提示“稍后再试”）。
+2. 锁定：对 `course_session` 记录加互斥锁，防止同时写入。
+3. 数据清理：按依赖顺序删除 `note_doc / cards / mock_paper / mindmap_graph / outline_node / slide / block / uploads_meta` 等表中的 `course_session_id=session_id` 记录。
+4. 资源清理：删除 `uploads/{session_id}`, `assets/{session_id}`, `exports/{session_id}`, `.vectors/session_*.faiss`, 以及 repository 中持久化的 json artifact。
+5. 日志与确认：记录审计日志，返回 `{ deleted:true, session_id, released_bytes }`。
+
+**验收**
+
+- 删除完成后，DB/文件系统不存在残留；重复删除返回 404。
+- 全流程 ≤ 5s（1k 记录以内），失败自动回滚并提示具体阶段。
+
+### 3.9 语义化标题策略（Semantic Headline Policy）
+
+**目标**：所有生成产物的章节/卡片/题目标题必须是对内容的高度概括，禁止出现“第 X 页”“Page 3”等机械命名。
+
+**适用范围**
+
+- Outline Builder：节点 `title` 需复述主题（≤20 字/15 词），不可直接采用页码。
+- Note Generator：`sections[*].title`、`toc[*].title` 与 figures/equations caption 均需引用语义摘要；若未解析出标题，退化为“主题摘要 + 关键概念”，不可留空。
+- Template Suite：知识卡 `concept`、模拟题 `stem` 前缀、导图节点 `label` 与导出文件名，同遵循语义化命名。
+
+**验收**
+
+- 随机抽样 50 个标题，不得出现“第 X 页”“Page X”等模式；语义重复率 < 15%。
+- 解析失败场景需触发降级策略（如“图像识别基础：梯度下降假设”），并在日志中记录启用频次，便于后续优化。
+
 ------
 
 ## 4. API 设计（摘要）
@@ -540,4 +574,3 @@ rag:
   - Outline 阶段：`{section_summaries}`, `{key_terms}`
   - Expand 阶段：`{required_examples:n}`, `{equation_policy}`
   - Integrate 阶段：`{coherence_checks}`, `{cross_refs}`
-
