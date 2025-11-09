@@ -7,3 +7,7 @@ temp.pdf
 .DS_Store
 frontend.log
 backend.log
+AGENTS.md
+db/
+.vectors/
+uploads/
