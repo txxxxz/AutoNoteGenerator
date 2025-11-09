@@ -23,6 +23,7 @@ from app.schemas.api import (
     SessionSummary,
     NoteTaskResponse,
     NoteTaskStatus,
+    NoteLanguage,
 )
 from app.schemas.common import (
     ExportResponse,
@@ -154,14 +155,20 @@ def generate_notes(request: NotesRequest):
     difficulty = style.get("difficulty")
     if not detail or not difficulty:
         raise HTTPException(status_code=400, detail="style must include detail_level and difficulty")
+    language_value = request.language or style.get("language") or NoteLanguage.zh
+    try:
+        language = NoteLanguage(language_value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="language must be either 'zh' or 'en'") from exc
     logger.info(
-        "生成笔记: session_id=%s detail=%s difficulty=%s",
+        "生成笔记: session_id=%s detail=%s difficulty=%s language=%s",
         request.session_id,
         detail,
         difficulty,
+        language.value,
     )
     try:
-        task_id = submit_note_generation_task(request.session_id, detail, difficulty)
+        task_id = submit_note_generation_task(request.session_id, detail, difficulty, language.value)
     except Exception as exc:
         logger.exception("生成笔记失败: session_id=%s 错误=%s", request.session_id, exc)
         raise HTTPException(status_code=500, detail=f"生成笔记失败: {exc}") from exc

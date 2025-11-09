@@ -40,10 +40,16 @@ class StyleDifficulty(str, Enum):
     academic = "academic"
 
 
+class NoteLanguage(str, Enum):
+    zh = "zh"
+    en = "en"
+
+
 class NotesRequest(BaseModel):
     outline_tree_id: str
     style: Dict[str, str]
     session_id: str
+    language: NoteLanguage | None = None
 
 
 class NoteTaskResponse(BaseModel):
@@ -57,6 +63,7 @@ class NoteTaskStatus(BaseModel):
     progress: float = 0.0
     detail_level: str
     difficulty: str
+    language: NoteLanguage = NoteLanguage.zh
     total_sections: int = 0
     current_section: Optional[str] = None
     message: Optional[str] = None

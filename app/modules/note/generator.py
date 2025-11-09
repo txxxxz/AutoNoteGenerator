@@ -69,15 +69,18 @@ class NoteGenerator:
         layout_doc: LayoutDoc,
         detail_level: str,
         difficulty: str,
+        language: str,
         progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
     ) -> NoteDoc:
-        style_instructions = build_style_instructions(detail_level, difficulty)
+        style_instructions = build_style_instructions(detail_level, difficulty, language)
         docs = self._build_documents(layout_doc)
         vector_store = load_or_create(session_id, docs)
+        language_label = "Simplified Chinese" if language == "zh" else "English"
         system_prompt = (
             "You are StudyCompanion, tasked with generating structured course notes. "
             "You must adhere to the provided outline, respect the style instructions, "
-            "and reference the supplied context. Output in GitHub-flavoured Markdown."
+            "and reference the supplied context. Output in GitHub-flavoured Markdown. "
+            f"Write every heading, sentence, and annotation in {language_label}."
         )
         total_sections = len(outline.root.children)
         if progress_callback:
@@ -86,7 +89,7 @@ class NoteGenerator:
         if total_sections == 0:
             save(session_id, vector_store)
             return NoteDoc(
-                style={"detail_level": detail_level, "difficulty": difficulty},
+                style={"detail_level": detail_level, "difficulty": difficulty, "language": language},
                 toc=[],
                 sections=[],
             )
@@ -158,7 +161,7 @@ class NoteGenerator:
         save(session_id, vector_store)
         toc = [{"section_id": section.section_id, "title": section.title} for section in outline.root.children]
         return NoteDoc(
-            style={"detail_level": detail_level, "difficulty": difficulty},
+            style={"detail_level": detail_level, "difficulty": difficulty, "language": language},
             toc=toc,
             sections=sections,
         )

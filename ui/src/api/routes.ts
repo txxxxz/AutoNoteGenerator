@@ -15,7 +15,8 @@ import {
   SessionDetail,
   SessionSummary,
   ExportResponse,
-  DeleteSessionResponse
+  DeleteSessionResponse,
+  NoteLanguage
 } from './types';
 
 export const uploadFile = async (file: File, title?: string) => {
@@ -62,15 +63,18 @@ export const generateNotes = async (
   sessionId: string,
   outlineTreeId: string,
   detailLevel: string,
-  difficulty: string
+  difficulty: string,
+  language: NoteLanguage = 'zh'
 ) => {
   const response = await client.post('/notes/generate', {
     session_id: sessionId,
     outline_tree_id: outlineTreeId,
     style: {
       detail_level: detailLevel,
-      difficulty
-    }
+      difficulty,
+      language
+    },
+    language
   });
   return response.data as NoteTaskResponse;
 };

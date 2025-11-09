@@ -1,3 +1,5 @@
+export type NoteLanguage = 'zh' | 'en';
+
 export interface SlideBlock {
   id: string;
   type: 'title' | 'text' | 'image' | 'formula' | 'table';
@@ -74,7 +76,7 @@ export interface NoteSection {
 }
 
 export interface NoteDoc {
-  style: { detail_level: string; difficulty: string };
+  style: { detail_level: string; difficulty: string; language?: NoteLanguage };
   toc: { section_id: string; title: string }[];
   sections: NoteSection[];
 }
@@ -92,6 +94,7 @@ export interface NoteTaskStatus {
   progress: number;
   detail_level: string;
   difficulty: string;
+  language: NoteLanguage;
   total_sections: number;
   current_section?: string | null;
   message?: string | null;

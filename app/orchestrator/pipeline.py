@@ -252,6 +252,7 @@ class CourseSessionPipeline:
         self,
         detail_level: str,
         difficulty: str,
+        language: str,
         progress_callback: Optional[Callable[[dict], None]] = None,
     ) -> tuple[str, NoteDoc]:
         if progress_callback:
@@ -279,11 +280,12 @@ class CourseSessionPipeline:
             layout,
             detail_level,
             difficulty,
+            language,
             progress_callback=progress_callback,
         )
         if progress_callback:
             progress_callback({"phase": "save", "message": "整理并保存生成结果…"})
-        note_id = f"note_{self.session_id}_{detail_level}_{difficulty}"
+        note_id = f"note_{self.session_id}_{detail_level}_{difficulty}_{language}"
         repository.save_artifact(self.session_id, "note_doc", note_doc.model_dump(), artifact_id=note_id)
         notes_db.upsert(
             "note_doc",
@@ -292,6 +294,7 @@ class CourseSessionPipeline:
                 "course_session_id": self.session_id,
                 "style_detail": detail_level,
                 "style_difficulty": difficulty,
+                "style_language": language,
                 "content_md": json.dumps([s.model_dump() for s in note_doc.sections], ensure_ascii=False),
                 "toc_json": json.dumps(note_doc.toc, ensure_ascii=False),
             },

@@ -56,6 +56,7 @@ const SessionWorkspacePage = () => {
   const [view, setView] = useState<'notes' | 'cards' | 'mock' | 'mindmap'>('notes');
   const [detailLevel, setDetailLevel] = useState<DetailLevel>('medium');
   const [expressionLevel, setExpressionLevel] = useState<ExpressionLevel>('standard');
+  const [noteLanguage, setNoteLanguage] = useState<'zh' | 'en'>('zh');
   const [templates, setTemplates] = useState<{ notes: boolean; cards: boolean; mock: boolean; mindmap: boolean }>({
     notes: true,
     cards: false,
@@ -90,15 +91,18 @@ const SessionWorkspacePage = () => {
         if (latestNoteId) {
           const noteDoc = await fetchNoteDoc(latestNoteId);
           const expression = difficultyToExpression[noteDoc.style.difficulty as keyof typeof difficultyToExpression];
+          const language = (noteDoc.style.language as 'zh' | 'en') === 'en' ? 'en' : 'zh';
           setNote(
             sessionId,
             latestNoteId,
             noteDoc,
             noteDoc.style.detail_level as DetailLevel,
-            expression
+            expression,
+            language
           );
           setDetailLevel(noteDoc.style.detail_level as DetailLevel);
           setExpressionLevel(expression);
+          setNoteLanguage(language);
         }
         const latestCards = detail.cards_ids.at(-1);
         if (latestCards) {
@@ -164,7 +168,7 @@ const SessionWorkspacePage = () => {
 
   const handleTaskSuccess = async (status: NoteTaskStatus) => {
     if (!sessionId) return;
-    const noteDocId = status.note_doc_id;
+      const noteDocId = status.note_doc_id;
     let notePayload = status.note_doc ?? undefined;
     try {
       if (!noteDocId) {
@@ -176,7 +180,9 @@ const SessionWorkspacePage = () => {
       const detail = notePayload.style.detail_level as DetailLevel;
       const difficulty = (notePayload.style.difficulty ?? 'explanatory') as keyof typeof difficultyToExpression;
       const expression = difficultyToExpression[difficulty] ?? expressionLevel;
-      setNote(sessionId, noteDocId, notePayload, detail, expression);
+      const language = (notePayload.style.language as 'zh' | 'en') === 'en' ? 'en' : 'zh';
+      setNote(sessionId, noteDocId, notePayload, detail, expression, language);
+      setNoteLanguage(language);
       setMessage('笔记生成完成。');
 
       const needsExtras = templates.cards || templates.mock || templates.mindmap;
@@ -248,7 +254,8 @@ const SessionWorkspacePage = () => {
         sessionId,
         `outline_${sessionId}`,
         detailLevel,
-        expressionToDifficulty[expressionLevel]
+        expressionToDifficulty[expressionLevel],
+        noteLanguage
       );
       setGenerationState(sessionId, {
         generating: true,
@@ -318,15 +325,18 @@ const SessionWorkspacePage = () => {
     try {
       const noteDoc = await fetchNoteDoc(noteId);
       const expression = difficultyToExpression[noteDoc.style.difficulty as keyof typeof difficultyToExpression];
+      const language = (noteDoc.style.language as 'zh' | 'en') === 'en' ? 'en' : 'zh';
       setNote(
         sessionId,
         noteId,
         noteDoc,
         noteDoc.style.detail_level as DetailLevel,
-        expression
+        expression,
+        language
       );
       setDetailLevel(noteDoc.style.detail_level as DetailLevel);
       setExpressionLevel(expression);
+      setNoteLanguage(language);
       setMessage('已回退到所选版本。');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '回退失败');
@@ -529,10 +539,12 @@ const SessionWorkspacePage = () => {
           <StylePanel
             detailLevel={detailLevel}
             expressionLevel={expressionLevel}
+            language={noteLanguage}
             disabled={session?.generating}
-            onChange={({ detailLevel: d, expressionLevel: e }) => {
+            onChange={({ detailLevel: d, expressionLevel: e, language: lang }) => {
               setDetailLevel(d);
               setExpressionLevel(e);
+               setNoteLanguage(lang);
             }}
           />
           <TemplateSelector

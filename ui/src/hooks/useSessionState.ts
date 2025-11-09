@@ -6,6 +6,7 @@ import {
   MindmapGraph,
   MockPaper,
   NoteDoc,
+  NoteLanguage,
   SessionDetail
 } from '../api/types';
 import { DetailLevel, ExpressionLevel, HistoryEntry } from '../types/history';
@@ -41,7 +42,8 @@ type SessionStore = {
     noteDocId: string,
     noteDoc: NoteDoc,
     detailLevel: DetailLevel,
-    difficulty: ExpressionLevel
+    difficulty: ExpressionLevel,
+    language: NoteLanguage
   ) => void;
   setCards: (sessionId: string, cardsId: string, cards: KnowledgeCards) => void;
   setMock: (sessionId: string, mockId: string, mock: MockPaper) => void;
@@ -66,7 +68,7 @@ export const useSessionState = create<SessionStore>()(
         draft.sessions[sessionId].summary = summary;
       });
     },
-    setNote: (sessionId, noteDocId, noteDoc, detailLevel, difficulty) => {
+    setNote: (sessionId, noteDocId, noteDoc, detailLevel, difficulty, language) => {
       set((draft) => {
         draft.sessions[sessionId] = draft.sessions[sessionId] || { noteHistory: [] };
         const session = draft.sessions[sessionId];
@@ -77,6 +79,7 @@ export const useSessionState = create<SessionStore>()(
           id: noteDocId,
           detailLevel,
           difficulty,
+          language,
           timestamp: new Date().toISOString()
         });
         session.noteHistory = session.noteHistory.slice(0, 3);
