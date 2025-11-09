@@ -620,6 +620,7 @@ app/
 | `POST /api/v1/mindmap/generate` | 思维导图 | `{ session_id, outline_tree_id }` | `{ graph_id, graph }` |
 | `POST /api/v1/export` | 导出产物 | `{ session_id, target_id, type, format }` | `{ download_url, filename }` |
 | `POST /api/v1/qa/ask` | 浮动问答 | `{ session_id, scope, question }` | `{ answer, refs[] }` |
+| `DELETE /api/v1/sessions/{session_id}` | 删除会话 | `-` | `{ deleted, session_id, released_bytes }` |
 
 详尽字段定义参考 `doc/功能实现文档（Feature Implementation Doc）.md` 与 `app/schemas/common.py`。
 

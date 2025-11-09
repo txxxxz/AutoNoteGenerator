@@ -14,7 +14,8 @@ import {
   QAResponse,
   SessionDetail,
   SessionSummary,
-  ExportResponse
+  ExportResponse,
+  DeleteSessionResponse
 } from './types';
 
 export const uploadFile = async (file: File, title?: string) => {
@@ -167,4 +168,9 @@ export const fetchMock = async (mockId: string) => {
 export const fetchMindmap = async (graphId: string) => {
   const response = await client.get(`/mindmap/${graphId}`);
   return response.data as MindmapGraph;
+};
+
+export const deleteSession = async (sessionId: string) => {
+  const response = await client.delete(`/sessions/${sessionId}`);
+  return response.data as DeleteSessionResponse;
 };

@@ -142,6 +142,13 @@ class NoteTaskManager:
                 return None
             return state.events
 
+    def has_active_task(self, session_id: str) -> bool:
+        with self._lock:
+            return any(
+                state.session_id == session_id and state.status in {"queued", "running"}
+                for state in self._tasks.values()
+            )
+
     def _push_event(self, state: NoteTaskState, include_result: bool) -> None:
         payload = self._serialize(state, include_result=include_result, for_json=True)
         state.events.put(payload)

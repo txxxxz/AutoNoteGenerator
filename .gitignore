@@ -11,3 +11,10 @@ AGENTS.md
 db/
 .vectors/
 uploads/
+ui/node_modules/
+ui/dist/
+ui/.vite/
+.cache/
+.turbo/
+ui/.cache/
+ui/.turbo/

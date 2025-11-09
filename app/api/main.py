@@ -92,6 +92,17 @@ def get_session(session_id: str):
     return _build_session_detail(session_data)
 
 
+@app.delete("/api/v1/sessions/{session_id}")
+def delete_session(session_id: str):
+    if note_task_manager.has_active_task(session_id):
+        raise HTTPException(status_code=409, detail="当前会话仍有笔记生成任务进行中")
+    try:
+        result = manager.delete_session(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"deleted": True, **result}
+
+
 @app.post("/api/v1/parse", response_model=ParseResponse)
 def parse_file(request: ParseRequest):
     pipeline = get_pipeline(request.session_id)

@@ -1,5 +1,7 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import classNames from 'classnames';
 
 import { NoteSection } from '../../api/types';
@@ -32,7 +34,9 @@ const NoteSectionView = ({ section, pending, onRegenerate }: NoteSectionViewProp
             正在重新生成...
           </div>
         ) : (
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{section.body_md}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+            {section.body_md}
+          </ReactMarkdown>
         )}
       </article>
       {!!section.figures.length && (

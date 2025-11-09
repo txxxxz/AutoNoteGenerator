@@ -166,3 +166,9 @@ export interface SessionSummary {
 export interface SessionDetail extends SessionSummary {
   available_artifacts: Record<string, string[]>;
 }
+
+export interface DeleteSessionResponse {
+  deleted: boolean;
+  session_id: string;
+  released_bytes: number;
+}
