@@ -7,3 +7,16 @@ temp.pdf
 .DS_Store
 frontend.log
 backend.log
+AGENTS.md
+db/
+.vectors/
+uploads/
+node_modules/
+config/runtime_settings.json
+ui/node_modules/
+ui/dist/
+ui/.vite/
+.cache/
+.turbo/
+ui/.cache/
+ui/.turbo/

@@ -14,7 +14,11 @@ import {
   QAResponse,
   SessionDetail,
   SessionSummary,
-  ExportResponse
+  ExportResponse,
+  DeleteSessionResponse,
+  NoteLanguage,
+  LlmSettingsResponse,
+  LlmSettingsPayload
 } from './types';
 
 export const uploadFile = async (file: File, title?: string) => {
@@ -61,15 +65,18 @@ export const generateNotes = async (
   sessionId: string,
   outlineTreeId: string,
   detailLevel: string,
-  difficulty: string
+  difficulty: string,
+  language: NoteLanguage = 'zh'
 ) => {
   const response = await client.post('/notes/generate', {
     session_id: sessionId,
     outline_tree_id: outlineTreeId,
     style: {
       detail_level: detailLevel,
-      difficulty
-    }
+      difficulty,
+      language
+    },
+    language
   });
   return response.data as NoteTaskResponse;
 };
@@ -167,4 +174,19 @@ export const fetchMock = async (mockId: string) => {
 export const fetchMindmap = async (graphId: string) => {
   const response = await client.get(`/mindmap/${graphId}`);
   return response.data as MindmapGraph;
+};
+
+export const deleteSession = async (sessionId: string) => {
+  const response = await client.delete(`/sessions/${sessionId}`);
+  return response.data as DeleteSessionResponse;
+};
+
+export const fetchLlmSettings = async () => {
+  const response = await client.get('/settings/llm');
+  return response.data as LlmSettingsResponse;
+};
+
+export const updateLlmSettings = async (payload: LlmSettingsPayload) => {
+  const response = await client.post('/settings/llm', payload);
+  return response.data as LlmSettingsResponse;
 };

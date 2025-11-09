@@ -13,7 +13,7 @@ class OutlineBuilder:
         for page in layout_doc.pages:
             title_el = next((e for e in page.elements if e.kind.value == "title"), None)
             content_elements = [e for e in page.elements if e is not title_el]
-            section_title = title_el.content if title_el and title_el.content else f"第{page.page_no}页"
+            section_title = self._resolve_section_title(page, title_el, content_elements)
             full_text = " ".join(
                 normalize_whitespace(e.content or "") for e in content_elements if e.content
             )
@@ -44,3 +44,17 @@ class OutlineBuilder:
             children=children,
         )
         return OutlineTree(root=root)
+
+    def _resolve_section_title(self, page, title_el, content_elements) -> str:
+        if title_el and title_el.content:
+            return normalize_whitespace(title_el.content)[:60]
+        for element in content_elements:
+            candidate = take_sentences(element.content or "", 1)
+            if candidate:
+                return candidate[:60]
+        for element in page.elements:
+            if element.content:
+                candidate = take_sentences(element.content, 1)
+                if candidate:
+                    return candidate[:60]
+        return f"页面{page.page_no}主题"

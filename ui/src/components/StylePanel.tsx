@@ -3,8 +3,13 @@ import '../styles/panel.css';
 type StylePanelProps = {
   detailLevel: 'brief' | 'medium' | 'detailed';
   expressionLevel: 'popular' | 'standard' | 'insightful';
+  language: 'zh' | 'en';
   disabled?: boolean;
-  onChange: (value: { detailLevel: 'brief' | 'medium' | 'detailed'; expressionLevel: 'popular' | 'standard' | 'insightful' }) => void;
+  onChange: (value: {
+    detailLevel: 'brief' | 'medium' | 'detailed';
+    expressionLevel: 'popular' | 'standard' | 'insightful';
+    language: 'zh' | 'en';
+  }) => void;
 };
 
 const detailOptions: Array<{ value: 'brief' | 'medium' | 'detailed'; label: string }> = [
@@ -19,7 +24,12 @@ const expressionOptions: Array<{ value: 'popular' | 'standard' | 'insightful'; l
   { value: 'insightful', label: '学术型' }
 ];
 
-const StylePanel = ({ detailLevel, expressionLevel, disabled, onChange }: StylePanelProps) => {
+const languageOptions: Array<{ value: 'zh' | 'en'; label: string }> = [
+  { value: 'zh', label: '输出中文' },
+  { value: 'en', label: '输出英文' }
+];
+
+const StylePanel = ({ detailLevel, expressionLevel, language, disabled, onChange }: StylePanelProps) => {
   return (
     <section className="panel-section" aria-labelledby="style-panel-heading">
       <header className="panel-header">
@@ -31,7 +41,7 @@ const StylePanel = ({ detailLevel, expressionLevel, disabled, onChange }: StyleP
           <button
             key={option.value}
             className={`panel-radio ${detailLevel === option.value ? 'active' : ''}`}
-            onClick={() => !disabled && onChange({ detailLevel: option.value, expressionLevel })}
+            onClick={() => !disabled && onChange({ detailLevel: option.value, expressionLevel, language })}
             disabled={disabled}
             aria-pressed={detailLevel === option.value}
           >
@@ -44,9 +54,22 @@ const StylePanel = ({ detailLevel, expressionLevel, disabled, onChange }: StyleP
           <button
             key={option.value}
             className={`panel-radio ${expressionLevel === option.value ? 'active' : ''}`}
-            onClick={() => !disabled && onChange({ detailLevel, expressionLevel: option.value })}
+            onClick={() => !disabled && onChange({ detailLevel, expressionLevel: option.value, language })}
             disabled={disabled}
             aria-pressed={expressionLevel === option.value}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      <div className="panel-group" role="radiogroup" aria-label="输出语言">
+        {languageOptions.map((option) => (
+          <button
+            key={option.value}
+            className={`panel-radio ${language === option.value ? 'active' : ''}`}
+            onClick={() => !disabled && onChange({ detailLevel, expressionLevel, language: option.value })}
+            disabled={disabled}
+            aria-pressed={language === option.value}
           >
             {option.label}
           </button>

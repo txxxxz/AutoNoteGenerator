@@ -100,7 +100,31 @@ DIFFICULTY_POLICIES = {
 }
 
 
-def build_style_instructions(detail_level: str, difficulty: str) -> str:
+BLUEPRINT_TRANSLATIONS = {
+    "## 核心要点：2-3 条精炼 bullet，总结本节最重要的事实或结论。": "## Key Takeaways: Provide 2-3 concise bullets summarizing the most important facts or conclusions.",
+    "## 必记术语：列出关键词并给出一句释义；无内容时写“待补充”。": '## Must-Know Terms: List keywords with one-sentence explanations; if information is missing, write "TBD".',
+    "## 速记提示：给出记忆口诀或课堂提醒；若缺少信息请标注“待补充”。": '## Memory Aids: Offer mnemonics or in-class reminders; label the section as "TBD" when content is unavailable.',
+    "## 概要：1-2 段交代主题、背景与学习目标。": "## Overview: Use 1-2 paragraphs to describe the topic, background, and learning objectives.",
+    "## 核心概念：条列关键术语，附 1-2 句标准定义与作用。": "## Core Concepts: Enumerate key terms with 1-2 sentence definitions and roles.",
+    "## 推导 / 示例：使用段落或列表说明关键推理步骤，至少包含一个例子。": "## Derivations / Examples: Explain the main reasoning steps using paragraphs or lists and include at least one example.",
+    "## 条件与限制：列举适用前提、常见误区或对比。": "## Conditions & Limitations: List prerequisites, common pitfalls, or comparisons.",
+    "## 小结：1 段概括学习收获与下一步建议。": "## Summary: Capture key learnings and the next recommended action in one paragraph.",
+    "## 章节导论：交代理论来源、前置知识与研究意义。": "## Chapter Introduction: Introduce theoretical origins, prerequisites, and research significance.",
+    "## 概念体系：分层阐述术语、公式及彼此关系，可使用子标题。": "## Concept System: Layer concepts, formulas, and their relationships; sub-headings are encouraged.",
+    "## 推导与证明：分步骤书写公式、变量解释与结论，必要时加入伪代码或编号列表。": "## Derivations & Proofs: Present formulas, variable explanations, and conclusions step-by-step; add pseudocode or numbered lists when needed.",
+    "## 案例与应用：给出至少一个深入案例/实验，说明步骤、结论与启示。": "## Cases & Applications: Provide at least one in-depth case/experiment detailing steps, findings, and implications.",
+    "## 条件、限制与扩展：详述假设、边界条件、常见反例与延伸阅读。": "## Conditions, Limits & Extensions: Describe assumptions, boundary conditions, counterexamples, and suggested readings.",
+    "## 总结与后续学习：总结关键洞见并推荐进阶资料或思考题。": "## Conclusion & Further Study: Summarize insights and propose advanced materials or reflection questions.",
+}
+
+
+def _localize_blueprint(entries: tuple[str, ...], language: str) -> tuple[str, ...]:
+    if language != "en":
+        return entries
+    return tuple(BLUEPRINT_TRANSLATIONS.get(item, item) for item in entries)
+
+
+def build_style_instructions(detail_level: str, difficulty: str, language: str = "zh") -> str:
     detail = DETAIL_POLICIES[detail_level]
     difficulty_policy = DIFFICULTY_POLICIES[difficulty]
     summary_policy = (
@@ -113,8 +137,14 @@ def build_style_instructions(detail_level: str, difficulty: str) -> str:
         if detail.examples_per_section
         else "Skip detailed examples; focus on conclusions and key definitions."
     )
+    blueprint = _localize_blueprint(detail.section_blueprint, language)
     structure_lines = "\n  ".join(
-        f"{index + 1}. {item}" for index, item in enumerate(detail.section_blueprint)
+        f"{index + 1}. {item}" for index, item in enumerate(blueprint)
+    )
+    language_instruction = (
+        "Use Simplified Chinese for every heading, paragraph, and bullet; translate technical terms into Chinese when possible."
+        if language == "zh"
+        else "Write all headings, sentences, and annotations in fluent English; translate any Chinese context instead of copying it."
     )
     instructions = [
         f"Target total length between {detail.length_ratio[0]:.1f}x and {detail.length_ratio[1]:.1f}x of the base outline.",
@@ -132,5 +162,6 @@ def build_style_instructions(detail_level: str, difficulty: str) -> str:
         difficulty_policy.constraints,
         "Use anchors from the outline when referencing sources; format as `参考锚点：anchor:...`.",
         "When contextual evidence is missing, state “待补充” instead of fabricating details.",
+        language_instruction,
     ]
     return "\n".join(f"- {line}" for line in instructions)

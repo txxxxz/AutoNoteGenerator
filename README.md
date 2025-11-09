@@ -181,6 +181,8 @@ curl -X POST "http://localhost:8000/api/v1/outline/build" \
 | 日常学习 | `medium` | `explanatory` | 标准教科书风格 |
 | 深度研究 | `detailed` | `academic` | 包含完整推导和理论背景 |
 
+> 通过 `language` 选项可切换输出语言：`zh`（默认，中文）或 `en`（英文）。可在 `style.language` 中声明，也可在请求体顶层携带 `language` 字段。
+
 **示例: 生成标准讲解风格的笔记**
 
 ```bash
@@ -191,8 +193,10 @@ curl -X POST "http://localhost:8000/api/v1/notes/generate" \
     "outline_tree_id": "auto",
     "style": {
       "detail_level": "medium",
-      "difficulty": "explanatory"
-    }
+      "difficulty": "explanatory",
+      "language": "zh"
+    },
+    "language": "zh"
   }'
 ```
 
@@ -565,6 +569,16 @@ app/
 2. **准备环境变量（可选）**
    在 `.env.txt` 中配置 LLM / 向量模型参数（默认使用 Google Gemini；亦支持 OpenAI 兼容接口）。
 
+### API 设置面板
+
+在「StudyCompanion」仪表盘顶部新增 **API 设置** 标签，可直接在浏览器内配置 LLM 服务：
+
+- 选择提供方（Google Gemini / OpenAI 兼容）。
+- 输入或更新 `API Key` 与 `Base URL`（非官方 OpenAI 服务时使用）。
+- 指定推理模型与 Embedding 模型，保存后立即作用于后端。
+
+所有设置会写入本地 `config/runtime_settings.json`，不需要重启服务。
+
 3. **启动 API 服务**
    ```bash
    uvicorn main:app --reload --port 8000 --log-level debug
@@ -592,7 +606,7 @@ app/
 
    # 3. 生成笔记、卡片、模拟题、导图
    curl -X POST http://localhost:8000/api/v1/notes/generate \
-        -d '{"session_id":"...","outline_tree_id":"auto","style":{"detail_level":"medium","difficulty":"explanatory"}}'
+        -d '{"session_id":"...","outline_tree_id":"auto","style":{"detail_level":"medium","difficulty":"explanatory","language":"zh"},"language":"zh"}'
    curl -X POST http://localhost:8000/api/v1/cards/generate -d '{"session_id":"...","note_doc_id":"note_..."}'
    curl -X POST http://localhost:8000/api/v1/mock/generate -d '{"session_id":"...","note_doc_id":"note_...","options":{"mode":"full","size":20,"difficulty":"mid"}}'
    curl -X POST http://localhost:8000/api/v1/mindmap/generate -d '{"session_id":"...","outline_tree_id":"outline_..."}'
@@ -614,12 +628,14 @@ app/
 | `POST /api/v1/parse` | PPT/PDF 解析 | `{ session_id, file_id, file_type }` | `{ doc_meta, slides[] }` |
 | `POST /api/v1/layout/build` | 页面式还原 | `{ session_id, file_id }` | `{ layout_doc }` |
 | `POST /api/v1/outline/build` | 章节大纲 | `{ session_id }` | `{ outline_tree }` |
-| `POST /api/v1/notes/generate` | 结构化笔记（9 风格） | `{ session_id, outline_tree_id, style }` | `{ note_doc_id, note_doc }` |
+| `POST /api/v1/notes/generate` | 结构化笔记（9 风格） | `{ session_id, outline_tree_id, style, language? }` | `{ note_doc_id, note_doc }` |
 | `POST /api/v1/cards/generate` | 知识卡片 | `{ session_id, note_doc_id }` | `{ cards_id, cards }` |
 | `POST /api/v1/mock/generate` | 模拟试题 | `{ session_id, note_doc_id, options }` | `{ paper_id, paper }` |
 | `POST /api/v1/mindmap/generate` | 思维导图 | `{ session_id, outline_tree_id }` | `{ graph_id, graph }` |
 | `POST /api/v1/export` | 导出产物 | `{ session_id, target_id, type, format }` | `{ download_url, filename }` |
 | `POST /api/v1/qa/ask` | 浮动问答 | `{ session_id, scope, question }` | `{ answer, refs[] }` |
+| `GET/POST /api/v1/settings/llm` | 读取 / 更新 LLM 运行时配置 | `-` / `{ provider?, api_key?, base_url?, llm_model?, embedding_model? }` | `{ provider, base_url?, llm_model?, embedding_model?, api_key_present }` |
+| `DELETE /api/v1/sessions/{session_id}` | 删除会话 | `-` | `{ deleted, session_id, released_bytes }` |
 
 详尽字段定义参考 `doc/功能实现文档（Feature Implementation Doc）.md` 与 `app/schemas/common.py`。
 

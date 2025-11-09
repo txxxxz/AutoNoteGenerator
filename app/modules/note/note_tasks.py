@@ -18,6 +18,7 @@ class NoteTaskState:
     session_id: str
     detail_level: str
     difficulty: str
+    language: str
     status: str = "queued"
     progress: float = 0.0
     total_sections: int = 0
@@ -34,13 +35,16 @@ class NoteTaskManager:
         self._tasks: Dict[str, NoteTaskState] = {}
         self._lock = threading.Lock()
 
-    def create_task(self, session_id: str, detail_level: str, difficulty: str) -> NoteTaskState:
+    def create_task(
+        self, session_id: str, detail_level: str, difficulty: str, language: str
+    ) -> NoteTaskState:
         task_id = new_id("task")
         state = NoteTaskState(
             task_id=task_id,
             session_id=session_id,
             detail_level=detail_level,
             difficulty=difficulty,
+            language=language,
             message="任务已排队，等待执行…",
         )
         with self._lock:
@@ -142,6 +146,13 @@ class NoteTaskManager:
                 return None
             return state.events
 
+    def has_active_task(self, session_id: str) -> bool:
+        with self._lock:
+            return any(
+                state.session_id == session_id and state.status in {"queued", "running"}
+                for state in self._tasks.values()
+            )
+
     def _push_event(self, state: NoteTaskState, include_result: bool) -> None:
         payload = self._serialize(state, include_result=include_result, for_json=True)
         state.events.put(payload)
@@ -159,6 +170,7 @@ class NoteTaskManager:
             "progress": round(state.progress, 2),
             "detail_level": state.detail_level,
             "difficulty": state.difficulty,
+            "language": state.language,
             "total_sections": state.total_sections,
             "current_section": state.current_section,
             "message": state.message,
@@ -180,8 +192,10 @@ note_task_manager = NoteTaskManager()
 _executor = ThreadPoolExecutor(max_workers=2)
 
 
-def submit_note_generation_task(session_id: str, detail_level: str, difficulty: str) -> str:
-    state = note_task_manager.create_task(session_id, detail_level, difficulty)
+def submit_note_generation_task(
+    session_id: str, detail_level: str, difficulty: str, language: str
+) -> str:
+    state = note_task_manager.create_task(session_id, detail_level, difficulty, language)
 
     def runner() -> None:
         note_task_manager.mark_running(state.task_id)
@@ -190,6 +204,7 @@ def submit_note_generation_task(session_id: str, detail_level: str, difficulty: 
             note_id, note_doc = pipeline.generate_notes(
                 detail_level,
                 difficulty,
+                language,
                 progress_callback=lambda event: note_task_manager.handle_progress(state.task_id, event),
             )
             note_task_manager.mark_completed(state.task_id, note_id, note_doc)

@@ -1,10 +1,18 @@
-import { useEffect, useState } from 'react';
+import { KeyboardEvent, MouseEvent, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
 import FileUploader from '../components/FileUploader';
 import ProgressBar from '../components/ProgressBar';
-import { buildLayout, buildOutline, listSessions, parseFile, uploadFile } from '../api/routes';
+import ApiSettingsPanel from '../components/ApiSettingsPanel';
+import {
+  buildLayout,
+  buildOutline,
+  deleteSession,
+  listSessions,
+  parseFile,
+  uploadFile
+} from '../api/routes';
 import { SessionSummary } from '../api/types';
 import { useSessionState } from '../hooks/useSessionState';
 import { debug } from '../api/debug';
@@ -16,6 +24,8 @@ const DashboardPage = () => {
   const [loadingSessions, setLoadingSessions] = useState(true);
   const [uploadState, setUploadState] = useState<'idle' | 'uploading' | 'parsing' | 'layout' | 'outline'>('idle');
   const [progressMessage, setProgressMessage] = useState('');
+  const [deletingMap, setDeletingMap] = useState<Record<string, boolean>>({});
+  const [activeTab, setActiveTab] = useState<'sessions' | 'api'>('sessions');
 
   const refreshSessions = async () => {
     setLoadingSessions(true);
@@ -68,6 +78,48 @@ const DashboardPage = () => {
     }
   };
 
+  const handleSessionNavigate = (sessionId: string) => {
+    navigate(`/session/${sessionId}`);
+  };
+
+  const handleCardKeyDown = (event: KeyboardEvent<HTMLDivElement>, sessionId: string) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      handleSessionNavigate(sessionId);
+    }
+  };
+
+  const handleDeleteSession = async (event: MouseEvent<HTMLButtonElement>, session: SessionSummary) => {
+    event.stopPropagation();
+    if (deletingMap[session.id]) {
+      return;
+    }
+    const confirmed = window.confirm(`确认删除“${session.title}”吗？该操作不可恢复。`);
+    if (!confirmed) {
+      return;
+    }
+    setDeletingMap((prev) => ({ ...prev, [session.id]: true }));
+    try {
+      await deleteSession(session.id);
+      setSessions((prev) => prev.filter((item) => item.id !== session.id));
+      debug.info('会话删除成功', session.id);
+    } catch (error) {
+      const message = axios.isAxiosError(error)
+        ? error.response?.data?.detail ?? error.message
+        : error instanceof Error
+          ? error.message
+          : '删除失败';
+      window.alert(message);
+      debug.error('删除会话失败', message, error);
+    } finally {
+      setDeletingMap((prev) => {
+        const next = { ...prev };
+        delete next[session.id];
+        return next;
+      });
+    }
+  };
+
   return (
     <div className="dashboard">
       <header className="dashboard__header">
@@ -88,26 +140,69 @@ const DashboardPage = () => {
           )}
         </div>
       </header>
-      <section className="dashboard__list" aria-live="polite">
-        <h2>最近会话</h2>
-        {loadingSessions ? (
-          <p>加载中…</p>
-        ) : sessions.length ? (
-          <div className="session-grid">
-            {sessions.map((session) => (
-              <button key={session.id} className="session-card" onClick={() => navigate(`/session/${session.id}`)}>
-                <h3>{session.title}</h3>
-                <p>状态：{session.status}</p>
-                <span>{new Date(session.created_at).toLocaleString()}</span>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="dashboard__empty">
-            <p>尚无学习会话，上传 PPT 或 PDF 后即可开始。</p>
-          </div>
-        )}
-      </section>
+      <nav className="dashboard__tabs" role="tablist" aria-label="主面板切换">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'sessions'}
+          className={`dashboard__tab ${activeTab === 'sessions' ? 'active' : ''}`}
+          onClick={() => setActiveTab('sessions')}
+        >
+          学习会话
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'api'}
+          className={`dashboard__tab ${activeTab === 'api' ? 'active' : ''}`}
+          onClick={() => setActiveTab('api')}
+        >
+          API 设置
+        </button>
+      </nav>
+      {activeTab === 'sessions' ? (
+        <section className="dashboard__list" aria-live="polite">
+          <h2>最近会话</h2>
+          {loadingSessions ? (
+            <p>加载中…</p>
+          ) : sessions.length ? (
+            <div className="session-grid">
+              {sessions.map((session) => (
+                <div
+                  key={session.id}
+                  className="session-card"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleSessionNavigate(session.id)}
+                  onKeyDown={(event) => handleCardKeyDown(event, session.id)}
+                  aria-label={`打开会话 ${session.title}`}
+                >
+                  <div className="session-card__header">
+                    <h3>{session.title}</h3>
+                    <button
+                      type="button"
+                      className="session-card__delete"
+                      onClick={(event) => handleDeleteSession(event, session)}
+                      disabled={Boolean(deletingMap[session.id])}
+                      aria-label={`删除会话 ${session.title}`}
+                    >
+                      {deletingMap[session.id] ? '删除中…' : '删除'}
+                    </button>
+                  </div>
+                  <p>状态：{session.status}</p>
+                  <span>{new Date(session.created_at).toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="dashboard__empty">
+              <p>尚无学习会话，上传 PPT 或 PDF 后即可开始。</p>
+            </div>
+          )}
+        </section>
+      ) : (
+        <ApiSettingsPanel />
+      )}
     </div>
   );
 };

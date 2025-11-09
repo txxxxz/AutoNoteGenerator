@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import './styles/tokens.css';
 import './styles/global.css';
+import 'katex/dist/katex.min.css';
 
 const queryClient = new QueryClient();
 

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 from datetime import datetime
+from pathlib import Path
 from typing import Callable, Optional
 
 from app.configs.settings import settings
@@ -25,6 +28,10 @@ from app.storage.database import notes_db, slides_db
 from app.storage.repository import repository
 from app.utils.identifiers import new_id
 from app.utils.logger import logger
+
+ASSET_ROOT = Path(os.getenv("SC_ASSET_ROOT", "assets"))
+EXPORT_ROOT = Path(os.getenv("SC_EXPORT_ROOT", "exports"))
+VECTOR_ROOT = Path(os.getenv("SC_VECTOR_ROOT", ".vectors"))
 
 
 class CourseSessionManager:
@@ -108,6 +115,91 @@ class CourseSessionManager:
             "file_id": row[4],
         }
 
+    def delete_session(self, session_id: str) -> dict:
+        row = slides_db.fetchone(
+            "SELECT file_id FROM course_session WHERE id=?",
+            (session_id,),
+        )
+        if not row:
+            logger.warning("删除会话失败: 未找到 session_id=%s", session_id)
+            raise ValueError(f"session {session_id} not found")
+        file_id = row["file_id"] if hasattr(row, "keys") else row[0]
+        logger.info("开始删除会话: session_id=%s file_id=%s", session_id, file_id)
+        self._purge_relational_data(session_id)
+        released_bytes = self._purge_session_files(session_id, file_id)
+        logger.info("会话删除完成: session_id=%s 释放 %.2f KB", session_id, released_bytes / 1024 or 0.0)
+        return {
+            "session_id": session_id,
+            "released_bytes": released_bytes,
+        }
+
+    def _purge_relational_data(self, session_id: str) -> None:
+        with slides_db.connect() as conn:
+            cursor = conn.execute(
+                "SELECT id FROM slide WHERE course_session_id=?",
+                (session_id,),
+            )
+            slide_ids = [row[0] for row in cursor.fetchall()]
+            if slide_ids:
+                conn.executemany(
+                    "DELETE FROM block WHERE slide_id=?",
+                    ((slide_id,) for slide_id in slide_ids),
+                )
+            conn.execute("DELETE FROM slide WHERE course_session_id=?", (session_id,))
+            conn.execute("DELETE FROM outline_node WHERE course_session_id=?", (session_id,))
+            conn.execute("DELETE FROM artifact WHERE course_session_id=?", (session_id,))
+            conn.execute("DELETE FROM course_session WHERE id=?", (session_id,))
+        with notes_db.connect() as conn:
+            conn.execute("DELETE FROM note_doc WHERE course_session_id=?", (session_id,))
+            conn.execute("DELETE FROM artifact WHERE course_session_id=?", (session_id,))
+
+    def _purge_session_files(self, session_id: str, file_id: str | None) -> int:
+        released = 0
+        if file_id:
+            released += self._delete_upload_files(file_id)
+        released += self._delete_path(ASSET_ROOT / session_id)
+        released += self._delete_path(EXPORT_ROOT / session_id)
+        released += self._delete_vector_files(session_id)
+        return released
+
+    def _delete_upload_files(self, file_id: str) -> int:
+        released = 0
+        for path in uploads.UPLOAD_ROOT.glob(f"{file_id}*"):
+            released += self._delete_path(path)
+        return released
+
+    def _delete_vector_files(self, session_id: str) -> int:
+        released = 0
+        base = VECTOR_ROOT / f"{session_id}.faiss"
+        aux = base.with_suffix(".pkl")
+        released += self._delete_path(base)
+        released += self._delete_path(aux)
+        return released
+
+    def _delete_path(self, path: Path) -> int:
+        try:
+            if not path.exists():
+                return 0
+            if path.is_file():
+                size = path.stat().st_size
+                path.unlink(missing_ok=True)
+                return size
+            if path.is_dir():
+                size = 0
+                for file_path in path.rglob("*"):
+                    if file_path.is_file():
+                        try:
+                            size += file_path.stat().st_size
+                        except OSError:
+                            continue
+                shutil.rmtree(path, ignore_errors=True)
+                return size
+        except FileNotFoundError:
+            return 0
+        except OSError as exc:
+            logger.warning("删除路径失败: path=%s error=%s", path, exc)
+        return 0
+
 
 class CourseSessionPipeline:
     def __init__(self, session_id: str):
@@ -160,6 +252,7 @@ class CourseSessionPipeline:
         self,
         detail_level: str,
         difficulty: str,
+        language: str,
         progress_callback: Optional[Callable[[dict], None]] = None,
     ) -> tuple[str, NoteDoc]:
         if progress_callback:
@@ -187,11 +280,12 @@ class CourseSessionPipeline:
             layout,
             detail_level,
             difficulty,
+            language,
             progress_callback=progress_callback,
         )
         if progress_callback:
             progress_callback({"phase": "save", "message": "整理并保存生成结果…"})
-        note_id = f"note_{self.session_id}_{detail_level}_{difficulty}"
+        note_id = f"note_{self.session_id}_{detail_level}_{difficulty}_{language}"
         repository.save_artifact(self.session_id, "note_doc", note_doc.model_dump(), artifact_id=note_id)
         notes_db.upsert(
             "note_doc",
@@ -200,6 +294,7 @@ class CourseSessionPipeline:
                 "course_session_id": self.session_id,
                 "style_detail": detail_level,
                 "style_difficulty": difficulty,
+                "style_language": language,
                 "content_md": json.dumps([s.model_dump() for s in note_doc.sections], ensure_ascii=False),
                 "toc_json": json.dumps(note_doc.toc, ensure_ascii=False),
             },

@@ -1,3 +1,5 @@
+export type NoteLanguage = 'zh' | 'en';
+
 export interface SlideBlock {
   id: string;
   type: 'title' | 'text' | 'image' | 'formula' | 'table';
@@ -74,7 +76,7 @@ export interface NoteSection {
 }
 
 export interface NoteDoc {
-  style: { detail_level: string; difficulty: string };
+  style: { detail_level: string; difficulty: string; language?: NoteLanguage };
   toc: { section_id: string; title: string }[];
   sections: NoteSection[];
 }
@@ -92,6 +94,7 @@ export interface NoteTaskStatus {
   progress: number;
   detail_level: string;
   difficulty: string;
+  language: NoteLanguage;
   total_sections: number;
   current_section?: string | null;
   message?: string | null;
@@ -165,4 +168,29 @@ export interface SessionSummary {
 
 export interface SessionDetail extends SessionSummary {
   available_artifacts: Record<string, string[]>;
+}
+
+export interface DeleteSessionResponse {
+  deleted: boolean;
+  session_id: string;
+  released_bytes: number;
+}
+
+export type LlmProvider = 'google' | 'openai';
+
+export interface LlmSettingsPayload {
+  provider?: LlmProvider;
+  api_key?: string;
+  base_url?: string;
+  llm_model?: string;
+  embedding_model?: string;
+}
+
+export interface LlmSettingsResponse {
+  provider: LlmProvider;
+  api_key_present: boolean;
+  api_key_preview?: string | null;
+  base_url?: string | null;
+  llm_model?: string | null;
+  embedding_model?: string | null;
 }

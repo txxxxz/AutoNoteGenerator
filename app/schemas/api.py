@@ -40,10 +40,16 @@ class StyleDifficulty(str, Enum):
     academic = "academic"
 
 
+class NoteLanguage(str, Enum):
+    zh = "zh"
+    en = "en"
+
+
 class NotesRequest(BaseModel):
     outline_tree_id: str
     style: Dict[str, str]
     session_id: str
+    language: NoteLanguage | None = None
 
 
 class NoteTaskResponse(BaseModel):
@@ -57,6 +63,7 @@ class NoteTaskStatus(BaseModel):
     progress: float = 0.0
     detail_level: str
     difficulty: str
+    language: NoteLanguage = NoteLanguage.zh
     total_sections: int = 0
     current_section: Optional[str] = None
     message: Optional[str] = None
@@ -118,3 +125,20 @@ class SessionListResponse(BaseModel):
 
 class SessionDetail(SessionSummary):
     available_artifacts: Dict[str, List[str]] = Field(default_factory=dict)
+
+
+class LLMSettingsPayload(BaseModel):
+    provider: Literal["google", "openai"] | None = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    llm_model: Optional[str] = None
+    embedding_model: Optional[str] = None
+
+
+class LLMSettingsResponse(BaseModel):
+    provider: Literal["google", "openai"]
+    base_url: Optional[str] = None
+    llm_model: Optional[str] = None
+    embedding_model: Optional[str] = None
+    api_key_present: bool = False
+    api_key_preview: Optional[str] = None

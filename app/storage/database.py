@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS note_doc (
     course_session_id TEXT,
     style_detail TEXT,
     style_difficulty TEXT,
+    style_language TEXT,
     content_md TEXT,
     toc_json TEXT
 );
@@ -141,6 +142,15 @@ class Database:
             cur = conn.execute(sql, params or [])
             return cur.fetchall()
 
+    def ensure_column(self, table: str, column: str, definition: str) -> None:
+        with self.connect() as conn:
+            cursor = conn.execute(f"PRAGMA table_info({table})")
+            columns = {row[1] for row in cursor.fetchall()}
+            if column not in columns:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+                logger.info("新增列: %s.%s", table, column)
+
 
 slides_db = Database(SLIDES_DB_PATH, SLIDES_SCHEMA)
 notes_db = Database(NOTES_DB_PATH, NOTES_SCHEMA)
+notes_db.ensure_column("note_doc", "style_language", "TEXT")
