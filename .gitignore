@@ -11,6 +11,8 @@ AGENTS.md
 db/
 .vectors/
 uploads/
+node_modules/
+config/runtime_settings.json
 ui/node_modules/
 ui/dist/
 ui/.vite/

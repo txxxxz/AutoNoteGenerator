@@ -125,3 +125,20 @@ class SessionListResponse(BaseModel):
 
 class SessionDetail(SessionSummary):
     available_artifacts: Dict[str, List[str]] = Field(default_factory=dict)
+
+
+class LLMSettingsPayload(BaseModel):
+    provider: Literal["google", "openai"] | None = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    llm_model: Optional[str] = None
+    embedding_model: Optional[str] = None
+
+
+class LLMSettingsResponse(BaseModel):
+    provider: Literal["google", "openai"]
+    base_url: Optional[str] = None
+    llm_model: Optional[str] = None
+    embedding_model: Optional[str] = None
+    api_key_present: bool = False
+    api_key_preview: Optional[str] = None

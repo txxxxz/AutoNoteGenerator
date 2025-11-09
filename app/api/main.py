@@ -24,6 +24,8 @@ from app.schemas.api import (
     NoteTaskResponse,
     NoteTaskStatus,
     NoteLanguage,
+    LLMSettingsPayload,
+    LLMSettingsResponse,
 )
 from app.schemas.common import (
     ExportResponse,
@@ -38,9 +40,11 @@ from app.schemas.common import (
 )
 from app.storage import uploads
 from app.storage.repository import repository
+from app.storage.settings_store import get_llm_settings, save_llm_settings
 from app.modules.exporter.export_service import ExportService
 from app.modules.qa.qa_service import QAService
 from app.modules.note.note_tasks import note_task_manager, submit_note_generation_task
+from app.modules.note.llm_client import LLM_PROVIDER, reset_llm_cache
 from app.configs.settings import settings
 from app.utils.logger import logger
 
@@ -347,6 +351,19 @@ def get_mindmap(graph_id: str):
     return _load_mindmap(graph_id)
 
 
+@app.get("/api/v1/settings/llm", response_model=LLMSettingsResponse)
+def read_llm_settings():
+    return _build_llm_settings_response(get_llm_settings())
+
+
+@app.post("/api/v1/settings/llm", response_model=LLMSettingsResponse)
+def update_llm_settings(payload: LLMSettingsPayload):
+    updates = payload.model_dump(exclude_unset=True)
+    saved = save_llm_settings(updates)
+    reset_llm_cache()
+    return _build_llm_settings_response(saved)
+
+
 def _build_session_summary(session_data: dict) -> SessionSummary:
     session_id = session_data["id"]
     note_ids = repository.list_artifact_ids(session_id, "note_doc")
@@ -380,4 +397,27 @@ def _build_session_detail(session_data: dict) -> SessionDetail:
     return SessionDetail(
         **summary.model_dump(),
         available_artifacts=available,
+    )
+
+
+def _build_llm_settings_response(payload: dict | None) -> LLMSettingsResponse:
+    payload = payload or {}
+    provider = (payload.get("provider") or LLM_PROVIDER).strip().lower()
+    if provider not in {"google", "openai"}:
+        provider = LLM_PROVIDER
+    llm_model = payload.get("llm_model")
+    embedding_model = payload.get("embedding_model")
+    base_url = payload.get("base_url")
+    api_key = payload.get("api_key")
+    api_key_present = bool(api_key)
+    preview = None
+    if api_key_present and isinstance(api_key, str):
+        preview = f"...{api_key[-4:]}" if len(api_key) > 4 else "****"
+    return LLMSettingsResponse(
+        provider=provider,  # type: ignore[arg-type]
+        llm_model=llm_model,
+        embedding_model=embedding_model,
+        base_url=base_url,
+        api_key_present=api_key_present,
+        api_key_preview=preview,
     )

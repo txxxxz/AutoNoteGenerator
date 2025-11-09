@@ -16,7 +16,9 @@ import {
   SessionSummary,
   ExportResponse,
   DeleteSessionResponse,
-  NoteLanguage
+  NoteLanguage,
+  LlmSettingsResponse,
+  LlmSettingsPayload
 } from './types';
 
 export const uploadFile = async (file: File, title?: string) => {
@@ -177,4 +179,14 @@ export const fetchMindmap = async (graphId: string) => {
 export const deleteSession = async (sessionId: string) => {
   const response = await client.delete(`/sessions/${sessionId}`);
   return response.data as DeleteSessionResponse;
+};
+
+export const fetchLlmSettings = async () => {
+  const response = await client.get('/settings/llm');
+  return response.data as LlmSettingsResponse;
+};
+
+export const updateLlmSettings = async (payload: LlmSettingsPayload) => {
+  const response = await client.post('/settings/llm', payload);
+  return response.data as LlmSettingsResponse;
 };

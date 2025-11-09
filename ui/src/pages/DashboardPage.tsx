@@ -4,6 +4,7 @@ import axios from 'axios';
 
 import FileUploader from '../components/FileUploader';
 import ProgressBar from '../components/ProgressBar';
+import ApiSettingsPanel from '../components/ApiSettingsPanel';
 import {
   buildLayout,
   buildOutline,
@@ -24,6 +25,7 @@ const DashboardPage = () => {
   const [uploadState, setUploadState] = useState<'idle' | 'uploading' | 'parsing' | 'layout' | 'outline'>('idle');
   const [progressMessage, setProgressMessage] = useState('');
   const [deletingMap, setDeletingMap] = useState<Record<string, boolean>>({});
+  const [activeTab, setActiveTab] = useState<'sessions' | 'api'>('sessions');
 
   const refreshSessions = async () => {
     setLoadingSessions(true);
@@ -138,45 +140,69 @@ const DashboardPage = () => {
           )}
         </div>
       </header>
-      <section className="dashboard__list" aria-live="polite">
-        <h2>最近会话</h2>
-        {loadingSessions ? (
-          <p>加载中…</p>
-        ) : sessions.length ? (
-          <div className="session-grid">
-            {sessions.map((session) => (
-              <div
-                key={session.id}
-                className="session-card"
-                role="button"
-                tabIndex={0}
-                onClick={() => handleSessionNavigate(session.id)}
-                onKeyDown={(event) => handleCardKeyDown(event, session.id)}
-                aria-label={`打开会话 ${session.title}`}
-              >
-                <div className="session-card__header">
-                  <h3>{session.title}</h3>
-                  <button
-                    type="button"
-                    className="session-card__delete"
-                    onClick={(event) => handleDeleteSession(event, session)}
-                    disabled={Boolean(deletingMap[session.id])}
-                    aria-label={`删除会话 ${session.title}`}
-                  >
-                    {deletingMap[session.id] ? '删除中…' : '删除'}
-                  </button>
+      <nav className="dashboard__tabs" role="tablist" aria-label="主面板切换">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'sessions'}
+          className={`dashboard__tab ${activeTab === 'sessions' ? 'active' : ''}`}
+          onClick={() => setActiveTab('sessions')}
+        >
+          学习会话
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'api'}
+          className={`dashboard__tab ${activeTab === 'api' ? 'active' : ''}`}
+          onClick={() => setActiveTab('api')}
+        >
+          API 设置
+        </button>
+      </nav>
+      {activeTab === 'sessions' ? (
+        <section className="dashboard__list" aria-live="polite">
+          <h2>最近会话</h2>
+          {loadingSessions ? (
+            <p>加载中…</p>
+          ) : sessions.length ? (
+            <div className="session-grid">
+              {sessions.map((session) => (
+                <div
+                  key={session.id}
+                  className="session-card"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleSessionNavigate(session.id)}
+                  onKeyDown={(event) => handleCardKeyDown(event, session.id)}
+                  aria-label={`打开会话 ${session.title}`}
+                >
+                  <div className="session-card__header">
+                    <h3>{session.title}</h3>
+                    <button
+                      type="button"
+                      className="session-card__delete"
+                      onClick={(event) => handleDeleteSession(event, session)}
+                      disabled={Boolean(deletingMap[session.id])}
+                      aria-label={`删除会话 ${session.title}`}
+                    >
+                      {deletingMap[session.id] ? '删除中…' : '删除'}
+                    </button>
+                  </div>
+                  <p>状态：{session.status}</p>
+                  <span>{new Date(session.created_at).toLocaleString()}</span>
                 </div>
-                <p>状态：{session.status}</p>
-                <span>{new Date(session.created_at).toLocaleString()}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="dashboard__empty">
-            <p>尚无学习会话，上传 PPT 或 PDF 后即可开始。</p>
-          </div>
-        )}
-      </section>
+              ))}
+            </div>
+          ) : (
+            <div className="dashboard__empty">
+              <p>尚无学习会话，上传 PPT 或 PDF 后即可开始。</p>
+            </div>
+          )}
+        </section>
+      ) : (
+        <ApiSettingsPanel />
+      )}
     </div>
   );
 };

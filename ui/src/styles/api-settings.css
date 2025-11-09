@@ -1,0 +1,104 @@
+.api-settings {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.api-settings header h2 {
+  margin-bottom: var(--space-2);
+}
+
+.api-settings__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.api-settings__grid {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.api-settings label {
+  display: flex;
+  flex-direction: column;
+  font-weight: 500;
+  gap: var(--space-2);
+}
+
+.api-settings input,
+.api-settings select {
+  border: 1px solid var(--color-border, #d0d7de);
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
+  font-size: 0.95rem;
+  background: var(--color-background, #fff);
+}
+
+.api-settings input:focus,
+.api-settings select:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.api-settings small {
+  color: var(--color-text-muted);
+}
+
+.api-settings__clear-btn {
+  align-self: flex-start;
+  border: 1px dashed rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-size: 0.85rem;
+  background: transparent;
+  cursor: pointer;
+}
+
+.api-settings__clear-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.api-settings__success {
+  color: var(--color-success, #17803d);
+  font-weight: 500;
+}
+
+.api-settings__error {
+  color: var(--color-danger, #c62828);
+  font-weight: 500;
+}
+
+.api-settings__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.api-settings__actions button {
+  border: none;
+  background: var(--color-accent);
+  color: #fff;
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-4);
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.api-settings__actions button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.api-settings__placeholder {
+  padding: var(--space-5);
+  text-align: center;
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}

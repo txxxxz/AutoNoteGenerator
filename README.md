@@ -569,6 +569,16 @@ app/
 2. **准备环境变量（可选）**
    在 `.env.txt` 中配置 LLM / 向量模型参数（默认使用 Google Gemini；亦支持 OpenAI 兼容接口）。
 
+### API 设置面板
+
+在「StudyCompanion」仪表盘顶部新增 **API 设置** 标签，可直接在浏览器内配置 LLM 服务：
+
+- 选择提供方（Google Gemini / OpenAI 兼容）。
+- 输入或更新 `API Key` 与 `Base URL`（非官方 OpenAI 服务时使用）。
+- 指定推理模型与 Embedding 模型，保存后立即作用于后端。
+
+所有设置会写入本地 `config/runtime_settings.json`，不需要重启服务。
+
 3. **启动 API 服务**
    ```bash
    uvicorn main:app --reload --port 8000 --log-level debug
@@ -624,6 +634,7 @@ app/
 | `POST /api/v1/mindmap/generate` | 思维导图 | `{ session_id, outline_tree_id }` | `{ graph_id, graph }` |
 | `POST /api/v1/export` | 导出产物 | `{ session_id, target_id, type, format }` | `{ download_url, filename }` |
 | `POST /api/v1/qa/ask` | 浮动问答 | `{ session_id, scope, question }` | `{ answer, refs[] }` |
+| `GET/POST /api/v1/settings/llm` | 读取 / 更新 LLM 运行时配置 | `-` / `{ provider?, api_key?, base_url?, llm_model?, embedding_model? }` | `{ provider, base_url?, llm_model?, embedding_model?, api_key_present }` |
 | `DELETE /api/v1/sessions/{session_id}` | 删除会话 | `-` | `{ deleted, session_id, released_bytes }` |
 
 详尽字段定义参考 `doc/功能实现文档（Feature Implementation Doc）.md` 与 `app/schemas/common.py`。

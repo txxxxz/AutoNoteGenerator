@@ -175,3 +175,22 @@ export interface DeleteSessionResponse {
   session_id: string;
   released_bytes: number;
 }
+
+export type LlmProvider = 'google' | 'openai';
+
+export interface LlmSettingsPayload {
+  provider?: LlmProvider;
+  api_key?: string;
+  base_url?: string;
+  llm_model?: string;
+  embedding_model?: string;
+}
+
+export interface LlmSettingsResponse {
+  provider: LlmProvider;
+  api_key_present: boolean;
+  api_key_preview?: string | null;
+  base_url?: string | null;
+  llm_model?: string | null;
+  embedding_model?: string | null;
+}
