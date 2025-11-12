@@ -7,6 +7,7 @@ import {
   MockPaper,
   NoteDoc,
   NoteLanguage,
+  OutlineTree,
   SessionDetail
 } from '../api/types';
 import { DetailLevel, ExpressionLevel, HistoryEntry } from '../types/history';
@@ -24,6 +25,7 @@ type SessionData = {
   mindmapId?: string;
   mindmap?: MindmapGraph;
   outlineId?: string;
+  outline?: OutlineTree;
   layoutReady?: boolean;
   generating?: boolean;
   uploading?: boolean;
@@ -49,6 +51,7 @@ type SessionStore = {
   setMock: (sessionId: string, mockId: string, mock: MockPaper) => void;
   setMindmap: (sessionId: string, mindmapId: string, mindmap: MindmapGraph) => void;
   setOutlineId: (sessionId: string, outlineId: string) => void;
+  setOutline: (sessionId: string, outlineId: string, outline: OutlineTree) => void;
   setGenerationState: (sessionId: string, state: Partial<SessionData>) => void;
 };
 
@@ -111,6 +114,13 @@ export const useSessionState = create<SessionStore>()(
       set((draft) => {
         draft.sessions[sessionId] = draft.sessions[sessionId] || { noteHistory: [] };
         draft.sessions[sessionId].outlineId = outlineId;
+      });
+    },
+    setOutline: (sessionId, outlineId, outline) => {
+      set((draft) => {
+        draft.sessions[sessionId] = draft.sessions[sessionId] || { noteHistory: [] };
+        draft.sessions[sessionId].outlineId = outlineId;
+        draft.sessions[sessionId].outline = outline;
       });
     },
     setGenerationState: (sessionId, state) => {

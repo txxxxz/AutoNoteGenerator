@@ -8,6 +8,7 @@ import {
   fetchMindmap,
   fetchMock,
   fetchNoteDoc,
+  fetchOutline,
   generateCards,
   generateMindmap,
   generateMock,
@@ -21,6 +22,7 @@ import {
   MockPaper,
   NoteDoc,
   NoteTaskStatus,
+  OutlineNode,
   SessionDetail
 } from '../../api/types';
 import ContentSection from '../../components/ContentBlock/NoteSectionView';
@@ -30,7 +32,7 @@ import QaDrawer from '../../components/QaDrawer';
 import QaFab from '../../components/QaFab';
 import StylePanel from '../../components/StylePanel';
 import TemplateSelector from '../../components/TemplateSelector';
-import TocTree from '../../components/TocTree';
+import TocTree, { TocItem } from '../../components/TocTree';
 import { useScrollSync } from '../../hooks/useScrollSync';
 import { useSectionRegen } from '../../hooks/useSectionRegen';
 import { useSessionState } from '../../hooks/useSessionState';
@@ -75,6 +77,7 @@ const SessionWorkspacePage = () => {
   const setMock = useSessionState((state) => state.setMock);
   const setMindmap = useSessionState((state) => state.setMindmap);
   const setOutlineId = useSessionState((state) => state.setOutlineId);
+  const setOutline = useSessionState((state) => state.setOutline);
   const setGenerationState = useSessionState((state) => state.setGenerationState);
   const initialiseSession = useSessionState((state) => state.initialiseSession);
   const { pendingSection, startRegen, finishRegen } = useSectionRegen();
@@ -87,8 +90,21 @@ const SessionWorkspacePage = () => {
       try {
         const detail: SessionDetail = await getSessionDetail(sessionId);
         setSummary(sessionId, detail);
-        const latestNoteId = detail.note_doc_ids.at(-1);
-        if (latestNoteId) {
+        
+        // 加载 outline
+        const outlineIds = detail.available_artifacts?.outline;
+        if (outlineIds && outlineIds.length > 0) {
+          const latestOutlineId = outlineIds[outlineIds.length - 1];
+          try {
+            const outlineDoc = await fetchOutline(latestOutlineId);
+            setOutline(sessionId, latestOutlineId, outlineDoc);
+          } catch (error) {
+            console.warn('加载 outline 失败:', error);
+          }
+        }
+        
+        if (detail.note_doc_ids.length > 0) {
+          const latestNoteId = detail.note_doc_ids[detail.note_doc_ids.length - 1];
           const noteDoc = await fetchNoteDoc(latestNoteId);
           const expression = difficultyToExpression[noteDoc.style.difficulty as keyof typeof difficultyToExpression];
           const language = (noteDoc.style.language as 'zh' | 'en') === 'en' ? 'en' : 'zh';
@@ -104,18 +120,18 @@ const SessionWorkspacePage = () => {
           setExpressionLevel(expression);
           setNoteLanguage(language);
         }
-        const latestCards = detail.cards_ids.at(-1);
-        if (latestCards) {
+        if (detail.cards_ids.length > 0) {
+          const latestCards = detail.cards_ids[detail.cards_ids.length - 1];
           const cardsDoc = await fetchCards(latestCards);
           setCards(sessionId, latestCards, cardsDoc);
         }
-        const latestMock = detail.mock_ids.at(-1);
-        if (latestMock) {
+        if (detail.mock_ids.length > 0) {
+          const latestMock = detail.mock_ids[detail.mock_ids.length - 1];
           const mockDoc = await fetchMock(latestMock);
           setMock(sessionId, latestMock, mockDoc);
         }
-        const latestMindmap = detail.mindmap_ids.at(-1);
-        if (latestMindmap) {
+        if (detail.mindmap_ids.length > 0) {
+          const latestMindmap = detail.mindmap_ids[detail.mindmap_ids.length - 1];
           const mindmap = await fetchMindmap(latestMindmap);
           setMindmap(sessionId, latestMindmap, mindmap);
         }
@@ -142,16 +158,78 @@ const SessionWorkspacePage = () => {
   const mock: MockPaper | undefined = session?.mock;
   const mindmap: MindmapGraph | undefined = session?.mindmap;
 
-  const tocItems = useMemo(() => {
+  const tocItems = useMemo<TocItem[]>(() => {
+    const outline = session?.outline;
+    console.log('[DEBUG] tocItems生成:', {
+      hasOutline: !!outline,
+      hasRoot: !!outline?.root,
+      rootChildren: outline?.root?.children,
+      rootChildrenLength: outline?.root?.children?.length,
+      hasNoteDoc: !!noteDoc,
+      noteDocSectionsLength: noteDoc?.sections?.length
+    });
+    
+    // 打印 outline 的前几个子节点标题
+    if (outline?.root?.children?.length) {
+      console.log('[DEBUG] Outline前5个章节标题:', 
+        outline.root.children.slice(0, 5).map(child => ({
+          title: child.title,
+          level: child.level,
+          section_id: child.section_id
+        }))
+      );
+    }
+    
+    // 打印 noteDoc 的前几个 section 标题（如果存在）
+    if (noteDoc?.sections?.length) {
+      console.log('[DEBUG] NoteDoc前5个章节标题:', 
+        noteDoc.sections.slice(0, 5).map(section => ({
+          title: section.title,
+          section_id: section.section_id
+        }))
+      );
+    }
+    
+    if (outline?.root?.children?.length) {
+      const items: TocItem[] = [];
+      const visit = (node: OutlineNode, numbering: string) => {
+        const level = Math.min(Math.max(node.level || 1, 1), 5);
+        const title = `${numbering} ${node.title}`;
+        items.push({
+          id: node.section_id,
+          title,
+          level,
+          targetId: node.section_id
+        });
+        if (node.children && node.children.length > 0) {
+          node.children.forEach((child, index) => {
+            visit(child, `${numbering}.${index + 1}`);
+          });
+        }
+      };
+      outline.root.children.forEach((child, index) => {
+        visit(child, `${index + 1}.`);
+      });
+      console.log('[DEBUG] 使用outline生成tocItems (前5项):', items.slice(0, 5));
+      return items;
+    }
     if (!noteDoc) return [];
-    return noteDoc.sections.map((section, index) => ({
+    const fallbackItems = noteDoc.sections.map((section, index) => ({
       id: section.section_id,
       title: `${index + 1}. ${section.title}`,
-      level: 1
+      level: 1,
+      targetId: section.section_id
     }));
+    console.log('[DEBUG] 使用noteDoc生成tocItems (fallback, 前5项):', fallbackItems.slice(0, 5));
+    return fallbackItems;
+  }, [session?.outline, noteDoc]);
+
+  const scrollTargets = useMemo(() => {
+    if (!noteDoc) return [];
+    return noteDoc.sections.map((section) => section.section_id);
   }, [noteDoc]);
 
-  const { activeId, setActiveId } = useScrollSync(tocItems.map((item) => item.id));
+  const { activeId, setActiveId } = useScrollSync(scrollTargets);
 
   const handleTaskFailure = (errorMessage?: string | null) => {
     if (!sessionId) return;
@@ -366,15 +444,44 @@ const SessionWorkspacePage = () => {
   };
 
   useEffect(() => {
-    if (!session) return;
-    const outlineIds = session.summary?.available_artifacts?.outline;
-    if (outlineIds && outlineIds.length) {
-      const latest = outlineIds[outlineIds.length - 1];
-      if (latest) {
-        setOutlineId(sessionId, latest);
-      }
+    if (!sessionId || !session?.summary) return;
+    const outlineIds = session.summary.available_artifacts?.outline;
+    console.log('[DEBUG] outline加载检查:', {
+      sessionId,
+      hasSessionSummary: !!session?.summary,
+      availableArtifacts: session.summary.available_artifacts,
+      outlineIds,
+      currentOutlineId: session.outlineId,
+      hasOutline: !!session.outline,
+      outlineRoot: session.outline?.root
+    });
+    if (!outlineIds?.length) return;
+    const latest = outlineIds[outlineIds.length - 1];
+    if (!latest) return;
+    if (session.outlineId !== latest) {
+      setOutlineId(sessionId, latest);
     }
-  }, [session]);
+    if (session.outline && session.outlineId === latest) {
+      return;
+    }
+    let cancelled = false;
+    const loadOutline = async () => {
+      try {
+        console.log('[DEBUG] 开始加载outline:', latest);
+        const outlineTree = await fetchOutline(latest);
+        console.log('[DEBUG] outline加载成功:', outlineTree);
+        if (!cancelled) {
+          setOutline(sessionId, latest, outlineTree);
+        }
+      } catch (error) {
+        console.error('加载大纲失败', error);
+      }
+    };
+    void loadOutline();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, session?.summary, session?.outlineId, session?.outline, setOutlineId, setOutline]);
 
   if (!sessionId) {
     return (
@@ -403,7 +510,11 @@ const SessionWorkspacePage = () => {
         <div>
           <button className="workspace__back" onClick={() => navigate('/')}>返回仪表盘</button>
           <h1>{session?.summary?.title ?? '学习会话'}</h1>
-          <p className="workspace__status">当前状态：{session?.summary?.status ?? '就绪'}</p>
+          <p className="workspace__status">
+            当前状态：{session?.summary?.status ?? '就绪'}
+            {' | '}
+            目录来源：{session?.outline?.root?.children?.length ? `GPT大纲(${tocItems.length}项)` : `PPT标题(${tocItems.length}项)`}
+          </p>
         </div>
         <div className="workspace__actions">
           <button className="primary" onClick={handleGenerate} disabled={session?.generating}>生成</button>
@@ -432,9 +543,10 @@ const SessionWorkspacePage = () => {
             items={tocItems}
             activeId={activeId}
             searchTerm={searchTerm}
-            onSelect={(id) => {
-              setActiveId(id);
-              const elem = document.querySelector(`[data-section-id="${id}"]`);
+            onSelect={(item) => {
+              const targetId = item.targetId;
+              setActiveId(targetId);
+              const elem = document.querySelector(`[data-section-id="${targetId}"]`);
               if (elem) {
                 elem.scrollIntoView({ behavior: 'smooth', block: 'start' });
               }

@@ -54,6 +54,7 @@ export interface OutlineNode {
 
 export interface OutlineTree {
   root: OutlineNode;
+  markdown?: string;
 }
 
 export interface NoteFigure {

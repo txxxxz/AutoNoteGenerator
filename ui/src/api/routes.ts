@@ -4,12 +4,12 @@ import {
   CardsPayload,
   KnowledgeCards,
   LayoutDoc,
+  OutlineTree,
   NoteTaskResponse,
   NoteTaskStatus,
   MindmapGraph,
   MockPaper,
   NoteDoc,
-  OutlineTree,
   ParseResponse,
   QAResponse,
   SessionDetail,
@@ -58,6 +58,11 @@ export const buildOutline = async (sessionId: string) => {
   const response = await client.post('/outline/build', {
     session_id: sessionId
   });
+  return response.data as OutlineTree;
+};
+
+export const fetchOutline = async (outlineId: string) => {
+  const response = await client.get(`/outline/${outlineId}`);
   return response.data as OutlineTree;
 };
 

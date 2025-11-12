@@ -60,8 +60,10 @@ const DashboardPage = () => {
       debug.info('页面还原完成', { session_id });
       setUploadState('outline');
       setProgressMessage('大纲生成中…');
-      await buildOutline(session_id);
+      const outline = await buildOutline(session_id);
       debug.info('大纲生成完成', { session_id });
+      // 保存 outline 到 session state
+      useSessionState.getState().setOutline(session_id, `outline_${session_id}`, outline);
       await refreshSessions();
       navigate(`/session/${session_id}`);
     } catch (error) {
