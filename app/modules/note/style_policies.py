@@ -5,163 +5,138 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class DetailPolicy:
+    label: str
     length_ratio: tuple[float, float]
-    requires_summary: bool
-    summary_length: tuple[int, int]
-    examples_per_section: int
-    paragraph_bias: str
-    figure_caption_style: str
-    section_blueprint: tuple[str, ...]
+    summary: str
+    examples: str
+    structure: str
+    figure_caption: str
+    coverage: str
 
 
 @dataclass(frozen=True)
-class DifficultyPolicy:
-    tone: str
-    terminology_density: str
+class TonePolicy:
+    label: str
+    voice: str
+    terminology: str
     sentence_length: str
-    formula_usage: str
+    analogy: str
+    formula_guidance: str
     variable_policy: str
-    constraints: str
+    constraint_policy: str
+    transition: str
 
 
 DETAIL_POLICIES = {
     "brief": DetailPolicy(
+        label="简略",
         length_ratio=(0.6, 0.8),
-        requires_summary=False,
-        summary_length=(1, 2),
-        examples_per_section=0,
-        paragraph_bias="Use bullet lists with no more than 4 items.",
-        figure_caption_style="Explain each figure in one sentence focusing on purpose.",
-        section_blueprint=(
-            "## 核心要点：2-3 条精炼 bullet，总结本节最重要的事实或结论。",
-            "## 必记术语：列出关键词并给出一句释义；无内容时写“待补充”。",
-            "## 速记提示：给出记忆口诀或课堂提醒；若缺少信息请标注“待补充”。",
-        ),
+        summary="章节结尾可以省略总结；若必须总结，仅写 1 句“核心 takeaway”。",
+        examples="避免展开案例；若资料只有案例，请提炼成一句结论即可。",
+        structure="以 3-4 条短 bullet 或 1-2 句紧凑段落直接回答学生最关心的问题。",
+        figure_caption="图表或公式只需 1 句说明其用途或趋势。",
+        coverage="聚焦结论、关键定义与记忆提示，省略推导细节。",
     ),
     "medium": DetailPolicy(
+        label="中等",
         length_ratio=(0.9, 1.1),
-        requires_summary=True,
-        summary_length=(1, 2),
-        examples_per_section=1,
-        paragraph_bias="Balance between paragraphs and bullet lists.",
-        figure_caption_style="Explain each figure in 1-2 sentences covering purpose and usage.",
-        section_blueprint=(
-            "## 概要：1-2 段交代主题、背景与学习目标。",
-            "## 核心概念：条列关键术语，附 1-2 句标准定义与作用。",
-            "## 推导 / 示例：使用段落或列表说明关键推理步骤，至少包含一个例子。",
-            "## 条件与限制：列举适用前提、常见误区或对比。",
-            "## 小结：1 段概括学习收获与下一步建议。",
-        ),
+        summary="每节结尾提供 1-2 句总结，回答“学到了什么”。",
+        examples="至少写出 1 个例子或场景，突出关键步骤或直观感受。",
+        structure="段落与 bullet 均衡，段首使用“接下来/因此”等提示保持衔接。",
+        figure_caption="图表或公式用 1-2 句说明目的与使用方式。",
+        coverage="覆盖结论、定义与核心推理，必要时点出关键条件。",
     ),
     "detailed": DetailPolicy(
+        label="详细",
         length_ratio=(1.4, 1.7),
-        requires_summary=True,
-        summary_length=(2, 4),
-        examples_per_section=3,
-        paragraph_bias="Prefer explanatory paragraphs complemented by lists.",
-        figure_caption_style="Provide 2-4 sentence captions describing purpose, background, and limitations.",
-        section_blueprint=(
-            "## 章节导论：交代理论来源、前置知识与研究意义。",
-            "## 概念体系：分层阐述术语、公式及彼此关系，可使用子标题。",
-            "## 推导与证明：分步骤书写公式、变量解释与结论，必要时加入伪代码或编号列表。",
-            "## 案例与应用：给出至少一个深入案例/实验，说明步骤、结论与启示。",
-            "## 条件、限制与扩展：详述假设、边界条件、常见反例与延伸阅读。",
-            "## 总结与后续学习：总结关键洞见并推荐进阶资料或思考题。",
-        ),
+        summary="总结需 2-4 句，可列要点清单，包含洞见与下一步提示。",
+        examples="提供 2-3 个深入示例、推导节点或反例，说明条件与结果。",
+        structure="以段落为主并穿插列表，明确因果、条件与跨页内容的延续关系。",
+        figure_caption="图表或公式需要 2-4 句阐述背景、变量含义与适用边界。",
+        coverage="涵盖结论、定义、推理、约束与常见误区或实验洞察。",
     ),
 }
 
 
-DIFFICULTY_POLICIES = {
-    "simple": DifficultyPolicy(
-        tone="Use popular science tone with approachable analogies.",
-        terminology_density="Limit technical terms to 2 per 100 words.",
-        sentence_length="Keep sentences between 8 and 14 Chinese words or equivalent brevity.",
-        formula_usage="Delay formulas; present one key equation only after verbal explanation.",
-        variable_policy="Only define critical variables inline.",
-        constraints="Avoid unqualified claims; focus on practical clarity.",
+TONE_POLICIES = {
+    "simple": TonePolicy(
+        label="popular（亲切科普）",
+        voice="使用亲切、贴近口语的语气，先给“人话结论”再解释原因。",
+        terminology="每 100 词不超过 2 个术语，并立即用日常语言解释。",
+        sentence_length="句长保持在 8-14 个中文词或等效长度，避免复合长句。",
+        analogy="每个主题至少举 1 个贴近日常的比喻或生活场景。",
+        formula_guidance="先用文字解释直觉，再引入最多 1 个关键公式，说明它解决的问题。",
+        variable_policy="只点出最关键的变量含义，并融入句子而非罗列列表。",
+        constraint_policy="强调最直接的使用注意事项即可，无需罗列复杂假设。",
+        transition="多用“打个比方”“换句话说”“这意味着”等口头衔接表达。",
     ),
-    "explanatory": DifficultyPolicy(
-        tone="Use standard instructional tone appropriate for undergraduates.",
-        terminology_density="Use 3-6 key terms per 100 words with concise definitions.",
-        sentence_length="Use sentences between 12 and 20 Chinese words or equivalent.",
-        formula_usage="Include 1-2 necessary formulas with one sentence purpose.",
-        variable_policy="Define key variables as they appear.",
-        constraints="Highlight at least one applicable condition or limitation per major concept.",
+    "explanatory": TonePolicy(
+        label="standard（课堂讲解）",
+        voice="保持标准课堂讲解语气，逻辑清晰、步骤明确。",
+        terminology="每 100 词使用 3-6 个术语，并附一句定义或用途。",
+        sentence_length="句长控制在 12-20 个中文词，必要时拆成 bullet 提高清晰度。",
+        analogy="仅在概念生涩时使用简短类比，更多通过因果或步骤解释。",
+        formula_guidance="引入 1-2 个必要公式，并在同一句说明用途或适用条件。",
+        variable_policy="变量出现时立即说明含义、单位或范围。",
+        constraint_policy="每个主要概念至少写 1 条适用条件或限制。",
+        transition="使用“因此”“接下来”“基于上述”等逻辑连接词维持递进。",
     ),
-    "academic": DifficultyPolicy(
-        tone="Adopt an insightful academic tone with logical connectors.",
-        terminology_density="Use 6-10 domain terms per 100 words with definitions or references.",
-        sentence_length="Allow sentences between 16 and 24 Chinese words or equivalent complexity.",
-        formula_usage="Provide 2-3 formulas and a variable table where applicable.",
-        variable_policy="Add a variable table enumerating symbol, name, and unit/domain.",
-        constraints="State 1-2 applicability constraints or boundary conditions explicitly.",
+    "academic": TonePolicy(
+        label="insightful（半学术）",
+        voice="采用半学术语气，强调推理链与前提假设。",
+        terminology="每 100 词可使用 6-10 个术语，可引用标准命名或定理编号。",
+        sentence_length="句长允许 16-24 个中文词，包含多重从句但保持清晰。",
+        analogy="以对比、反例或条件讨论替代生活化比喻。",
+        formula_guidance="可呈现 2-3 个公式，并说明推导背景、变量角色与局限性。",
+        variable_policy="提供变量表或依次写出“符号=含义=单位/范围”。",
+        constraint_policy="明确写出 1-2 条边界条件、假设或不适用情形。",
+        transition="使用“在…条件下”“因此”“从而”“综上”等逻辑连接词强调推理路径。",
     ),
 }
 
 
-BLUEPRINT_TRANSLATIONS = {
-    "## 核心要点：2-3 条精炼 bullet，总结本节最重要的事实或结论。": "## Key Takeaways: Provide 2-3 concise bullets summarizing the most important facts or conclusions.",
-    "## 必记术语：列出关键词并给出一句释义；无内容时写“待补充”。": '## Must-Know Terms: List keywords with one-sentence explanations; if information is missing, write "TBD".',
-    "## 速记提示：给出记忆口诀或课堂提醒；若缺少信息请标注“待补充”。": '## Memory Aids: Offer mnemonics or in-class reminders; label the section as "TBD" when content is unavailable.',
-    "## 概要：1-2 段交代主题、背景与学习目标。": "## Overview: Use 1-2 paragraphs to describe the topic, background, and learning objectives.",
-    "## 核心概念：条列关键术语，附 1-2 句标准定义与作用。": "## Core Concepts: Enumerate key terms with 1-2 sentence definitions and roles.",
-    "## 推导 / 示例：使用段落或列表说明关键推理步骤，至少包含一个例子。": "## Derivations / Examples: Explain the main reasoning steps using paragraphs or lists and include at least one example.",
-    "## 条件与限制：列举适用前提、常见误区或对比。": "## Conditions & Limitations: List prerequisites, common pitfalls, or comparisons.",
-    "## 小结：1 段概括学习收获与下一步建议。": "## Summary: Capture key learnings and the next recommended action in one paragraph.",
-    "## 章节导论：交代理论来源、前置知识与研究意义。": "## Chapter Introduction: Introduce theoretical origins, prerequisites, and research significance.",
-    "## 概念体系：分层阐述术语、公式及彼此关系，可使用子标题。": "## Concept System: Layer concepts, formulas, and their relationships; sub-headings are encouraged.",
-    "## 推导与证明：分步骤书写公式、变量解释与结论，必要时加入伪代码或编号列表。": "## Derivations & Proofs: Present formulas, variable explanations, and conclusions step-by-step; add pseudocode or numbered lists when needed.",
-    "## 案例与应用：给出至少一个深入案例/实验，说明步骤、结论与启示。": "## Cases & Applications: Provide at least one in-depth case/experiment detailing steps, findings, and implications.",
-    "## 条件、限制与扩展：详述假设、边界条件、常见反例与延伸阅读。": "## Conditions, Limits & Extensions: Describe assumptions, boundary conditions, counterexamples, and suggested readings.",
-    "## 总结与后续学习：总结关键洞见并推荐进阶资料或思考题。": "## Conclusion & Further Study: Summarize insights and propose advanced materials or reflection questions.",
-}
-
-
-def _localize_blueprint(entries: tuple[str, ...], language: str) -> tuple[str, ...]:
-    if language != "en":
-        return entries
-    return tuple(BLUEPRINT_TRANSLATIONS.get(item, item) for item in entries)
+GLOBAL_PERSONA = (
+    "你是大学课程的智能讲解助手，负责把课件内容转化成自然、口头化的教学讲解，帮助学生理解知识而非逐页复述。"
+)
+FLOW_INSTRUCTION = (
+    "每个自然段遵循“为什么值得关注 → 是什么/概念 → 怎么做或如何应用”的顺序，不使用模板式小标题；用自然段或必要的 bullet 描述，并在段首或段尾写 1-2 句承上启下。"
+)
+FORMULA_RULE = (
+    "遇到公式请保留原符号，逐个解释符号含义，并说明该公式试图解决的问题或它的适用条件。"
+)
+FIGURE_PLACEHOLDER_RULE = (
+    "描述图表或截图的核心关系，并插入占位符 [FIG_PAGE_<页号>_IDX_<序号>: 描述] 指回原始资源。"
+)
+BULLET_RULE = (
+    "可使用 bullet 强调步骤或要点，但整段仍需连贯讲述，避免把篇章拆成模板化小节。"
+)
+MISSING_RULE = "上下文缺失或证据不足时，直接写“此处待补充”，绝不杜撰数据、推导或引用。"
+EVIDENCE_RULE = "示例、比喻与数字必须来自现有上下文；若资料只有片段，请标注缺口而非臆造。"
 
 
 def build_style_instructions(detail_level: str, difficulty: str, language: str = "zh") -> str:
     detail = DETAIL_POLICIES[detail_level]
-    difficulty_policy = DIFFICULTY_POLICIES[difficulty]
-    summary_policy = (
-        f"Provide section summaries of {detail.summary_length[0]}-{detail.summary_length[1]} sentences."
-        if detail.requires_summary
-        else "Section summaries are optional; include them only if they aid clarity."
-    )
-    example_policy = (
-        f"Include {detail.examples_per_section} illustrative example(s) per section."
-        if detail.examples_per_section
-        else "Skip detailed examples; focus on conclusions and key definitions."
-    )
-    blueprint = _localize_blueprint(detail.section_blueprint, language)
-    structure_lines = "\n  ".join(
-        f"{index + 1}. {item}" for index, item in enumerate(blueprint)
-    )
+    tone = TONE_POLICIES[difficulty]
     language_instruction = (
-        "Use Simplified Chinese for every heading, paragraph, and bullet; translate technical terms into Chinese when possible."
+        "使用简体中文书写所有段落、 bullet 与占位符说明；如上下文为英文，也需翻译成中文保持统一。"
         if language == "zh"
-        else "Write all headings, sentences, and annotations in fluent English; translate any Chinese context instead of copying it."
+        else "Write every paragraph, list item, and placeholder description in fluent English; translate any Chinese context instead of copying it verbatim."
     )
-    instructions = [
-        f"Target total length between {detail.length_ratio[0]:.1f}x and {detail.length_ratio[1]:.1f}x of the base outline.",
-        "Follow the Markdown section skeleton below:\n  " + structure_lines,
-        "Only fill a section when the retrieved context covers it; otherwise write “待补充”。",
-        detail.paragraph_bias,
-        detail.figure_caption_style,
-        summary_policy,
-        example_policy,
-        difficulty_policy.tone,
-        difficulty_policy.terminology_density,
-        difficulty_policy.sentence_length,
-        difficulty_policy.formula_usage,
-        difficulty_policy.variable_policy,
-        difficulty_policy.constraints,
-        "Use anchors from the outline when referencing sources; format as `参考锚点：anchor:...`.",
-        "When contextual evidence is missing, state “待补充” instead of fabricating details.",
-        language_instruction,
+    sections = [
+        f"【角色设定】{GLOBAL_PERSONA}",
+        f"【讲解顺序】{FLOW_INSTRUCTION}",
+        f"【篇幅与重点｜{detail.label}】目标篇幅 {detail.length_ratio[0]:.1f}-{detail.length_ratio[1]:.1f}× 大纲基线；{detail.coverage}",
+        f"【结构倾向】{detail.structure}",
+        f"【总结与示例】{detail.summary} {detail.examples}",
+        f"【语气与衔接｜{tone.label}】{tone.voice} {tone.transition}",
+        f"【术语与句长】{tone.terminology} {tone.sentence_length}",
+        f"【比喻/修辞】{tone.analogy}",
+        f"【公式与图表】{detail.figure_caption} {tone.formula_guidance} {FORMULA_RULE}",
+        f"【变量与约束】{tone.variable_policy} {tone.constraint_policy}",
+        f"【bullet 使用】{BULLET_RULE}",
+        f"【图像占位符】{FIGURE_PLACEHOLDER_RULE}",
+        f"【缺失或不确定信息】{MISSING_RULE}",
+        f"【示例与依据】{EVIDENCE_RULE}",
+        f"【语言】{language_instruction}",
     ]
-    return "\n".join(f"- {line}" for line in instructions)
+    return "\n".join(f"- {line}" for line in sections if line)

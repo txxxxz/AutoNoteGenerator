@@ -80,6 +80,7 @@ OutlineNode.model_rebuild()
 
 class OutlineTree(BaseModel):
     root: OutlineNode
+    markdown: Optional[str] = None
 
 
 class NoteFigure(BaseModel):

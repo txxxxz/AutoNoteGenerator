@@ -126,13 +126,41 @@ export const exportArtifact = async (
   type: 'notes' | 'cards' | 'mock' | 'mindmap',
   format: 'md' | 'pdf' | 'png'
 ) => {
+  // 使用 blob 响应类型来下载文件
   const response = await client.post('/export', {
     session_id: sessionId,
     target_id: targetId,
     type,
     format
+  }, {
+    responseType: 'blob'
   });
-  return response.data as ExportResponse;
+  
+  // 从响应头获取文件名
+  const contentDisposition = response.headers['content-disposition'];
+  let filename = `${type}_${targetId}.${format}`;
+  if (contentDisposition) {
+    const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+    if (filenameMatch && filenameMatch[1]) {
+      filename = filenameMatch[1].replace(/['"]/g, '');
+    }
+  }
+  
+  // 创建下载链接并触发下载
+  const blob = new Blob([response.data]);
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+  
+  debug.info('文件下载完成', filename);
+  
+  // 返回成功响应（前端可能需要这个）
+  return { download_url: url, filename };
 };
 
 export const askQuestion = async (sessionId: string, scope: 'notes' | 'cards' | 'mock', question: string) => {

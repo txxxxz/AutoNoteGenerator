@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from difflib import SequenceMatcher
 from typing import Callable, Dict, List, Optional, Tuple
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -11,6 +13,7 @@ from langchain_core.documents import Document
 from app.modules.note.llm_client import get_llm
 from app.modules.note.style_policies import build_style_instructions
 from app.schemas.common import (
+    AnchorRef,
     LayoutDoc,
     LayoutElement,
     NoteDoc,
@@ -23,6 +26,8 @@ from app.schemas.common import (
 from app.storage.vector_store import load_or_create, save
 from app.utils.identifiers import new_id
 from app.utils.logger import logger
+from app.utils.outline import render_outline_markdown
+from app.utils.text import normalize_whitespace, take_sentences
 
 
 class NoteGenerator:
@@ -82,7 +87,16 @@ class NoteGenerator:
             "and reference the supplied context. Output in GitHub-flavoured Markdown. "
             f"Write every heading, sentence, and annotation in {language_label}."
         )
-        total_sections = len(outline.root.children)
+        enhanced_outline = self._build_natural_outline(layout_doc, outline)
+        sections_to_render = self._flatten_outline(enhanced_outline)
+        total_sections = len(sections_to_render)
+        if progress_callback:
+            progress_callback(
+                {
+                    "phase": "prepare",
+                    "message": f"共 {total_sections} 个自然结构章节待生成…",
+                }
+            )
         if progress_callback:
             progress_callback({"phase": "sections_total", "total": total_sections})
         figures_by_page, equations_by_page = self._collect_assets(layout_doc)
@@ -95,7 +109,7 @@ class NoteGenerator:
             )
 
         section_jobs: List[Tuple[int, OutlineNode, str, str]] = []
-        for index, section in enumerate(outline.root.children, start=1):
+        for index, section in enumerate(sections_to_render, start=1):
             context_text = self._retrieve_context(vector_store, section, docs)
             prompt = self._build_prompt(section, style_instructions, context_text)
             section_jobs.append((index, section, prompt, context_text))
@@ -159,7 +173,10 @@ class NoteGenerator:
 
         sections = [sections_map[index] for index in sorted(sections_map)]
         save(session_id, vector_store)
-        toc = [{"section_id": section.section_id, "title": section.title} for section in outline.root.children]
+        toc = [
+            {"section_id": section.section_id, "title": section.title}
+            for section in enhanced_outline.root.children
+        ]
         return NoteDoc(
             style={"detail_level": detail_level, "difficulty": difficulty, "language": language},
             toc=toc,
@@ -189,34 +206,225 @@ class NoteGenerator:
 
   
     def _build_prompt(self, section: OutlineNode, style_instructions: str, context_text: str) -> str:
-        return (
-            f"章节标题: {section.title}\n"
-            f"大纲摘要: {section.summary}\n"
-            f"风格指令:\n{style_instructions}\n\n"
-            f"上下文材料:\n{context_text}\n\n"
-            "请基于以上信息，生成**严格符合以下格式和内容要求**的 Markdown 内容：\n"
-            "### 格式要求\n"
-            "1. **标题层级**：仅使用二级标题（##）和三级标题（###），禁止一级标题（#）。\n"
-            "   - 二级标题用于核心模块（如“## 核心概念”“## 推导过程”）。\n"
-            "   - 三级标题用于子模块（如“### 定义1”“### 性质2”）。\n"
-            "2. **列表格式**：所有列表必须以短横线（-）开头，禁止星号（*）或数字序号。\n"
-            "3. **公式格式**：所有数学公式必须用 $$ 包裹（块级公式），如：$$L = -\sum p_j \log(q_j)$$。\n"
-        "   - 强制要求：公式必须完整闭合（开头和结尾都是 $$），禁止单独出现 $ 或未闭合的 $$。\n"
-        "   - 禁止公式内换行，确保 $$ 之间为完整公式（避免拆分到两行）。\n"
-            "4. **段落分隔**：不同模块之间用**一个空行**分隔，禁止连续空行。\n"
-            "### 内容要求\n"
-            "1. **严格过滤无关信息**：\n"
-            "   - 剔除所有页码标记（如 `6/78` `10/78` 等格式）。\n"
-            "   - 剔除重复文本、无意义标记（如 `Output not zero-centered`）。\n"
-            "   - 禁止直接复制上下文的原始段落，需用自己的语言重新组织。\n"
-            "2. **必含结构**：\n"
-            "   - ## 核心概念与解释\n"
-            "   - ## 关键结论或定理\n"
-            "   - ## 示例与推导（若上下文支持则包含）\n"
-            "   - ## 小结\n"
-            "3. **避免添加**：超出上下文的内容（如需补充请标注“扩展说明”）、冗余格式标记。\n"
-            "请严格遵循以上要求，输出仅保留与章节主题强相关的核心信息，格式统一、内容精炼。"
+        anchors_text = (
+            "\n".join(f"- 页 {anchor.page} · 锚点 {anchor.ref}" for anchor in section.anchors)
+            if section.anchors
+            else "- 无显式锚点，可结合上下文自由组织。"
         )
+        structure_template = self._build_structure_template(section)
+        structure_notes = self._structure_outline_notes(section)
+        return (
+            "你是一名大学课程讲师，请根据给定的自然章节结构写出完整讲解。\n"
+            f"章节标题：{section.title}\n"
+            f"章节概述：{section.summary}\n"
+            f"内容锚点：\n{anchors_text}\n\n"
+            "结构树（禁止新增/删减/改名标题，必须依次输出并在标题下填写内容）：\n"
+            f"{structure_template}\n\n"
+            "结构提示（供参考，可融入过渡语和段落）：\n"
+            f"{structure_notes}\n\n"
+            f"写作风格设定：\n{style_instructions}\n\n"
+            "写作要求：\n"
+            "1. 以“概念 → 推导/论证 → 应用/案例 → 小结”的顺序组织内容，必要时显式说明过渡语；\n"
+            "2. 对图片/公式引用使用占位符 `[FIG_PAGE_<页号>_IDX_<序号>: 说明]` 并解释其作用；\n"
+            "3. 输出须以 `## {章节标题}` 开头，并严格沿用上述结构树中列出的标题层级；\n"
+            "4. 禁止创建未在结构树中的标题或更改标题文字，可在标题下使用段落或 bullet；\n"
+            "5. 避免原文粘贴或冗余页码，所有陈述都要结合上下文重写；\n"
+            "6. 结尾在最后一个标题下用 1-2 句总结本节核心思想。\n\n"
+            f"可用上下文：\n{context_text}\n\n"
+            "请基于上述信息生成结构清晰、连贯的讲解。"
+        )
+
+    def _build_natural_outline(self, layout_doc: LayoutDoc, fallback: OutlineTree) -> OutlineTree:
+        try:
+            page_units = self._extract_page_units(layout_doc)
+            if not page_units:
+                return self._ensure_outline_markdown(fallback)
+            root_children: List[OutlineNode] = []
+            level_stack: List[OutlineNode] = []
+            for unit in page_units:
+                if not unit["title"].strip() and level_stack:
+                    self._extend_outline_node(level_stack[-1], unit)
+                    continue
+                level = max(1, unit["level"])
+                while level_stack and level_stack[-1].level >= level:
+                    level_stack.pop()
+                parent = level_stack[-1] if level_stack else None
+                siblings = parent.children if parent else root_children
+                existing = (
+                    siblings[-1]
+                    if siblings
+                    and siblings[-1].level == level
+                    and self._titles_similar(siblings[-1].title, unit["title"])
+                    else None
+                )
+                if existing:
+                    self._extend_outline_node(existing, unit)
+                    level_stack.append(existing)
+                    continue
+                node = OutlineNode(
+                    section_id=new_id("ns"),
+                    title=unit["title"],
+                    summary=unit["summary"],
+                    anchors=list(unit["anchors"]),
+                    level=level,
+                    children=[],
+                )
+                siblings.append(node)
+                if parent:
+                    self._append_unique_anchors(parent, node.anchors)
+                level_stack.append(node)
+            if not root_children:
+                return self._ensure_outline_markdown(fallback)
+            root = OutlineNode(
+                section_id=fallback.root.section_id,
+                title=fallback.root.title,
+                summary="自然结构章节重建完成。",
+                anchors=list(fallback.root.anchors),
+                level=0,
+                children=root_children,
+            )
+            return self._outline_with_markdown(root)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("自然结构重建失败，回退旧大纲: %s", exc)
+            return self._ensure_outline_markdown(fallback)
+
+    def _extract_page_units(self, layout_doc: LayoutDoc) -> List[dict]:
+        units: List[dict] = []
+        for page in layout_doc.pages:
+            title = ""
+            anchors: List[AnchorRef] = []
+            body_segments: List[str] = []
+            for element in page.elements:
+                text = normalize_whitespace(element.content or "")
+                if element.kind.value == "title" and not title and text:
+                    title = text[:80]
+                elif text:
+                    body_segments.append(text)
+                if element.caption:
+                    body_segments.append(normalize_whitespace(element.caption))
+                if element.latex:
+                    body_segments.append(element.latex)
+                if element.ref:
+                    anchors.append(AnchorRef(page=page.page_no, ref=element.ref))
+            merged_body = " ".join(seg for seg in body_segments if seg)
+            summary = take_sentences(merged_body, 3)[:320] if merged_body else ""
+            if not summary:
+                summary = "本部分暂无明确文字内容，请结合上下文生成。"
+            normalized_title = title or (body_segments[0][:60] if body_segments else "")
+            level = self._infer_level(normalized_title)
+            units.append(
+                {
+                    "title": normalized_title or f"页面{page.page_no}",
+                    "summary": summary,
+                    "anchors": anchors[:6] or [AnchorRef(page=page.page_no, ref=f"page-{page.page_no}")],
+                    "level": level,
+                }
+            )
+        return units
+
+    def _infer_level(self, title: str) -> int:
+        if not title:
+            return 3
+        normalized = normalize_whitespace(title)
+        lowered = normalized.lower()
+        if re.match(r"^(chapter|chap\.)\s*\d+", lowered) or re.match(r"^第[一二三四五六七八九十百零两]+\s*章", normalized):
+            return 1
+        if re.match(r"^\d+\.\d+\.\d+", normalized):
+            return 3
+        if re.match(r"^\d+\.\d+", normalized):
+            return 2
+        if re.match(r"^\d+(\s|-)", normalized):
+            return 1
+        if len(normalized.split()) <= 4:
+            return 1
+        return 2
+
+    def _titles_similar(self, left: str, right: str) -> bool:
+        if not left or not right:
+            return False
+        left_norm = normalize_whitespace(left).lower()
+        right_norm = normalize_whitespace(right).lower()
+        if left_norm == right_norm:
+            return True
+        left_key = left_norm.split(":")[0]
+        right_key = right_norm.split(":")[0]
+        if left_key and left_key == right_key:
+            return True
+        return SequenceMatcher(None, left_norm, right_norm).ratio() >= 0.88
+
+    def _extend_outline_node(self, node: OutlineNode, unit: dict) -> None:
+        node.summary = self._merge_summary(node.summary, unit["summary"])
+        existing = {(anchor.page, anchor.ref) for anchor in node.anchors}
+        for anchor in unit["anchors"]:
+            key = (anchor.page, anchor.ref)
+            if key not in existing:
+                node.anchors.append(anchor)
+                existing.add(key)
+
+    def _append_unique_anchors(self, node: OutlineNode, anchors: List[AnchorRef]) -> None:
+        existing = {(anchor.page, anchor.ref) for anchor in node.anchors}
+        for anchor in anchors:
+            key = (anchor.page, anchor.ref)
+            if key in existing:
+                continue
+            node.anchors.append(anchor)
+            existing.add(key)
+            if len(node.anchors) >= 12:
+                break
+
+    def _merge_summary(self, left: str, right: str) -> str:
+        merged = " ".join(filter(None, [left, right]))
+        if not merged:
+            return ""
+        return take_sentences(merged, 3)[:320] or merged[:320]
+
+    def _flatten_outline(self, outline: OutlineTree) -> List[OutlineNode]:
+        sections: List[OutlineNode] = []
+
+        def visit(node: OutlineNode) -> None:
+            if node.summary.strip() or node.anchors:
+                sections.append(node)
+            for child in node.children:
+                visit(child)
+
+        return [child for child in outline.root.children if child.title.strip()]
+
+    def _build_structure_template(self, section: OutlineNode) -> str:
+        lines: List[str] = []
+
+        def visit(node: OutlineNode) -> None:
+            level = max(2, min(node.level, 5)) if node.level else 2
+            prefix = "#" * level
+            lines.append(f"{prefix} {node.title}")
+            for child in node.children:
+                visit(child)
+
+        visit(section)
+        return "\n".join(lines)
+
+    def _structure_outline_notes(self, section: OutlineNode) -> str:
+        notes: List[str] = []
+
+        def visit(node: OutlineNode, depth: int = 0) -> None:
+            indent = "  " * depth
+            summary = (node.summary or "").strip()
+            if summary:
+                notes.append(f"{indent}- {node.title}: {summary}")
+            else:
+                notes.append(f"{indent}- {node.title}: 待补充")
+            for child in node.children:
+                visit(child, depth + 1)
+
+        visit(section)
+        return "\n".join(notes)
+
+    def _outline_with_markdown(self, root: OutlineNode) -> OutlineTree:
+        return OutlineTree(root=root, markdown=render_outline_markdown(root))
+
+    def _ensure_outline_markdown(self, outline: OutlineTree) -> OutlineTree:
+        if outline.markdown:
+            return outline
+        return OutlineTree(root=outline.root, markdown=render_outline_markdown(outline.root))
 
     def _fallback_section(self, section: OutlineNode, context_text: str) -> str:
         context = context_text.splitlines()[:5]

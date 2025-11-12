@@ -355,8 +355,9 @@ const SessionWorkspacePage = () => {
     if (!targetId) {
       throw new Error('该类型尚未生成');
     }
-    const result = await exportArtifact(sessionId, targetId, type, format);
-    window.open(result.download_url, '_blank');
+    // exportArtifact 现在会直接触发浏览器下载
+    await exportArtifact(sessionId, targetId, type, format);
+    setMessage(`${type} 导出成功`);
   };
 
   const handleAsk = async (scope: 'notes' | 'cards' | 'mock', question: string) => {
