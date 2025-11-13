@@ -25,16 +25,27 @@ class OutlineBuilder:
 
     def _build_semantic_outline(self, layout_doc: LayoutDoc, title: str) -> Optional[OutlineTree]:
         text_stream = self._compose_text_stream(layout_doc)
+        logger.info(f"📝 Composed text_stream: {len(text_stream)} chars from {len(layout_doc.pages)} pages")
         if not text_stream.strip():
+            logger.warning("❌ text_stream is empty, cannot generate outline")
             return None
         markdown = self._generate_outline_markdown(title, text_stream)
+        logger.info(f"📋 LLM generated markdown: {len(markdown)} chars")
         if not markdown:
+            logger.warning("❌ LLM returned empty markdown")
             return None
         parsed = parse_outline_markdown(markdown)
         if not parsed:
+            logger.warning("❌ Failed to parse markdown into outline structure")
             return None
         children = self._headings_to_nodes(parsed, layout_doc)
         if not children:
+            logger.warning("❌ No outline nodes generated from markdown")
+            return None
+        # 质量检查：至少要有2个一级章节，否则认为质量太差
+        level_2_chapters = [c for c in children if c.level == 2]
+        if len(level_2_chapters) < 2:
+            logger.warning(f"❌ Outline quality too low: only {len(level_2_chapters)} top-level chapters, expected at least 2")
             return None
         root_summary = "自然结构大纲涵盖：" + "；".join(child.title for child in children[:5])
         root = OutlineNode(
@@ -53,7 +64,10 @@ class OutlineBuilder:
         clipped_stream = text_stream
         max_chars = 18000
         if len(clipped_stream) > max_chars:
+            logger.info(f"✂️ Clipping text_stream from {len(clipped_stream)} to {max_chars} chars")
             clipped_stream = clipped_stream[:max_chars] + "\n...[内容截断，后续页略]..."
+        else:
+            logger.info(f"📄 Using full text_stream: {len(clipped_stream)} chars (under {max_chars} limit)")
 
         system_prompt = (
             "你是一名课程设计专家，负责让大学课程材料转化为有逻辑、可教学的知识大纲。"
@@ -68,8 +82,10 @@ class OutlineBuilder:
             "3. 每个标题后追加 `(p.x–y)` 或 `(p.x)`，表示该部分覆盖的 PDF 页码范围；\n"
             "4. 依据语义/逻辑组织章节，而非逐页罗列；\n"
             "5. 在每个标题正下方写一行 `> Summary:`，概述 1–2 句学习目标；\n"
-            "6. 一级章节建议 3–8 个，并涵盖所有重要内容，子层级不超过五级；\n"
-            "7. 输出纯 Markdown，不要额外解释或注释。\n\n"
+            "6. **必须生成至少 3 个一级章节（##），最多 8 个**，即使内容较少也要合理拆分主题；\n"
+            "7. 每个一级章节至少包含 1-2 个子章节（###），展现内容的层次结构；\n"
+            "8. 大纲必须涵盖所有重要页面，不要遗漏关键内容；\n"
+            "9. 输出纯 Markdown，不要额外解释或注释。\n\n"
             "### 示例结构\n"
             "```\n"
             "## 算法 1：线性回归 (p.3–10)\n"
@@ -81,7 +97,7 @@ class OutlineBuilder:
             "##### 应用示例 (p.7)\n"
             "> Summary: 将模型套用到房价预测。 \n"
             "```\n\n"
-            f"### 输入\n课程主题：{title}\n\n课件内容（含页码标记）：\n{text_stream}\n\n"
+            f"### 输入\n课程主题：{title}\n\n课件内容（含页码标记）：\n{clipped_stream}\n\n"
             "请输出满足上述要求的 Markdown 大纲："
         )
 

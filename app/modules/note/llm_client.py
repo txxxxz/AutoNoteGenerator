@@ -100,34 +100,29 @@ def _embedding_model_factory(
                 "langchain-openai is required when LLM_PROVIDER='openai'. "
                 "Install it with `pip install langchain-openai openai`."
             )
-        kwargs = {"model": embedding_model_name, "openai_api_key": api_key}
+        
+        # 构建参数，包括更长的超时时间
+        kwargs = {
+            "model": embedding_model_name,
+            "openai_api_key": api_key,
+            "request_timeout": 180.0,  # 3分钟超时
+            "max_retries": 2,  # 允许重试2次
+        }
         if base_url:
             kwargs["openai_api_base"] = base_url
         
         logger.info(
             f"初始化 OpenAI Embedding 模型: model={embedding_model_name}, "
-            f"base_url={base_url or 'default'}"
+            f"base_url={base_url or 'default'}, timeout=180s"
         )
         
         try:
             embeddings = OpenAIEmbeddings(**kwargs)
-            # 测试连接
-            logger.info("测试 embedding 模型连接...")
+            logger.info(f"✅ Embedding 模型初始化成功: {embedding_model_name}")
             return embeddings
         except Exception as e:
-            logger.error(f"OpenAI Embedding 初始化失败: {e}")
-            # 尝试使用备用模型
-            fallback_models = ["text-embedding-3-small", "text-embedding-ada-002"]
-            for fallback in fallback_models:
-                if fallback != embedding_model_name:
-                    logger.warning(f"尝试备用 embedding 模型: {fallback}")
-                    try:
-                        kwargs["model"] = fallback
-                        embeddings = OpenAIEmbeddings(**kwargs)
-                        logger.info(f"成功使用备用模型: {fallback}")
-                        return embeddings
-                    except Exception as fallback_e:
-                        logger.warning(f"备用模型 {fallback} 也失败: {fallback_e}")
+            logger.error(f"❌ OpenAI Embedding 初始化失败: {e}")
+            # 不自动降级，让用户明确知道问题
             raise
 
     if GoogleGenerativeAIEmbeddings is None:

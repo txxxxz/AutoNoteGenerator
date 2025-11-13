@@ -12,6 +12,7 @@ markdown-pdf
 python-dotenv
 pdfplumber
 python-pptx
+PyMuPDF
 PyYAML
 Pillow
 pydantic>=2.6.0

@@ -5,7 +5,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from difflib import SequenceMatcher
 from html import escape
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -39,6 +39,11 @@ PAGE_HEADING_PATTERN = re.compile(
     r"(?:第\s*(?P<page_cn>\d+)\s*页|Page\s+(?P<page_en>\d+))"
     r"(?:\s*[:：-]\s*(?P<rest>.*))?\s*$",
     re.IGNORECASE | re.MULTILINE,
+)
+
+FIGURE_PLACEHOLDER_PATTERN = re.compile(
+    r"\[FIG_PAGE_(?P<page>\d+)_IDX_(?P<idx>\d+)\s*[:：]\s*(?P<label>[^\]]+)\]",
+    re.IGNORECASE,
 )
 
 
@@ -79,7 +84,14 @@ class NoteGenerator:
         page_text: dict[int, str] = {}
         for page in layout_doc.pages:
             segments: List[str] = []
+            figure_counter = 0
             for element in page.elements:
+                if element.kind.value == "image":
+                    figure_counter += 1
+                    placeholder = (
+                        f"[FIG_PAGE_{page.page_no}_IDX_{figure_counter}: {normalize_whitespace(element.caption or '插图')}]"
+                    )
+                    segments.append(f"图像索引 {placeholder}")
                 if element.content:
                     segments.append(element.content.strip())
                 if element.caption:
@@ -264,7 +276,10 @@ class NoteGenerator:
             markdown = self._post_process_markdown(
                 markdown, section, style_profile.directives
             )
-            figures = self._resolve_figures(section, figures_by_page)
+            markdown, inline_figures = self._inject_inline_figures(
+                markdown, figures_by_page
+            )
+            figures = self._resolve_figures(section, figures_by_page, inline_figures)
             equations = self._resolve_equations(section, equations_by_page)
             note_section = NoteSection(
                 section_id=section.section_id,
@@ -386,7 +401,7 @@ class NoteGenerator:
                 "   - **表格**：仅在需要对比多个项目（如优缺点、多种方法、特性对比）时使用。",
                 "   - **项目符号（-）**：用于罗列步骤、要点清单、多个独立概念。",
                 "   - **段落**：用于连贯的叙述、推导过程、概念解释。",
-                "4. 图片占位符使用 `[FIG_PAGE_<页号>_IDX_<序号>: 用途说明]` 并解释其含义。",
+                "4. 图片占位符使用 `[FIG_PAGE_<页号>_IDX_<序号>: 用途说明]` 并在下一句用自然语言描述图像；若是算法/流程/网络结构图，额外展开关键步骤。",
                 "5. 遇到公式时使用 `$`/`$$` 包裹，并逐个解释符号含义与适用条件。",
             ]
             if language == "zh"
@@ -397,7 +412,7 @@ class NoteGenerator:
                 "   - **Tables**: Only when comparing multiple items (pros/cons, methods, features).",
                 "   - **Bullet points (-)**: For steps, checklists, or independent key points.",
                 "   - **Paragraphs**: For narrative explanations, derivations, or concept introductions.",
-                "4. Image placeholders must follow `[FIG_PAGE_<no>_IDX_<idx>: purpose]` and be interpreted in prose.",
+                "4. Image placeholders must follow `[FIG_PAGE_<no>_IDX_<idx>: purpose]`, and each placeholder must be followed by 1-2 sentences describing the visual; algorithm/process/network diagrams need an extra explanation of their logic.",
                 "5. Wrap formulas with `$`/`$$` and describe each symbol plus its constraints.",
             ]
         )
@@ -895,12 +910,67 @@ class NoteGenerator:
                     equations[page.page_no].append(element)
         return figures, equations
 
+    def _inject_inline_figures(
+        self,
+        markdown: str,
+        figures_by_page: Dict[int, List[LayoutElement]],
+    ) -> Tuple[str, Set[Tuple[int, int]]]:
+        if not markdown:
+            return markdown, set()
+
+        consumed: Set[Tuple[int, int]] = set()
+
+        def replace(match: re.Match[str]) -> str:
+            try:
+                page_no = int(match.group("page"))
+                idx = int(match.group("idx"))
+            except (TypeError, ValueError):  # pragma: no cover - robustness
+                return match.group(0)
+            label = (match.group("label") or "").strip()
+            element = self._lookup_figure_element(page_no, idx, figures_by_page)
+            if not element or not element.image_uri:
+                return match.group(0)
+            consumed.add((page_no, idx))
+            caption = label or (element.caption or "插图")
+            figure_html = (
+                f'<figure class="note-inline-figure" data-page="{page_no}" data-idx="{idx}">'
+                f'<img src="{element.image_uri}" alt="{escape(caption)}" />'
+                f'<figcaption>{escape(caption)}</figcaption>'
+                f"</figure>"
+            )
+            return figure_html
+
+        updated = FIGURE_PLACEHOLDER_PATTERN.sub(replace, markdown)
+        return updated, consumed
+
+    def _lookup_figure_element(
+        self,
+        page_no: int,
+        index: int,
+        figures_by_page: Dict[int, List[LayoutElement]],
+    ) -> Optional[LayoutElement]:
+        elements = figures_by_page.get(page_no)
+        if not elements:
+            return None
+        if index <= 0 or index > len(elements):
+            return None
+        return elements[index - 1]
+
     def _resolve_figures(
-        self, section: OutlineNode, figures_by_page: Dict[int, List[LayoutElement]]
+        self,
+        section: OutlineNode,
+        figures_by_page: Dict[int, List[LayoutElement]],
+        consumed: Optional[Set[Tuple[int, int]]] = None,
     ) -> List[NoteFigure]:
         figures: List[NoteFigure] = []
-        for anchor in section.anchors:
-            for element in figures_by_page.get(anchor.page, []):
+        pages_set = {anchor.page for anchor in section.anchors}
+        if not pages_set and section.pages:
+            pages_set = set(section.pages)
+        pages = sorted(pages_set)
+        for page_no in pages:
+            for idx, element in enumerate(figures_by_page.get(page_no, []), start=1):
+                if consumed and (page_no, idx) in consumed:
+                    continue
                 if element.image_uri:
                     figures.append(
                         NoteFigure(image_uri=element.image_uri, caption=element.caption or "")
