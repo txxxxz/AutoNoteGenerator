@@ -8,6 +8,7 @@ import classNames from 'classnames';
 
 import { NoteSection, OutlineNode } from '../../api/types';
 import '../../styles/note-section.css';
+import '../../styles/github-markdown.css';
 
 type NoteSectionViewProps = {
   section: NoteSection;

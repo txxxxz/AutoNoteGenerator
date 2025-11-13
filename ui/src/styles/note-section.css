@@ -38,11 +38,6 @@
 
 .note-section__body {
   margin-top: var(--space-4);
-  line-height: 1.6;
-}
-
-.note-section__body h3 {
-  margin-top: var(--space-4);
 }
 
 .note-section__body h3.page-heading {
@@ -67,11 +62,6 @@
   padding: 0.1rem 0.6rem;
   margin-left: var(--space-3);
   white-space: nowrap;
-}
-
-.note-section__body ul,
-.note-section__body ol {
-  padding-left: 1.2rem;
 }
 
 .note-section__figures {

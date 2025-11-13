@@ -20,3 +20,5 @@ ui/.vite/
 .turbo/
 ui/.cache/
 ui/.turbo/
+exports
+assets
