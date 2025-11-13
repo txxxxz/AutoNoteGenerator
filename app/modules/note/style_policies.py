@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Dict
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,13 @@ TONE_POLICIES = {
 }
 
 
+@dataclass(frozen=True)
+class StyleProfile:
+    text: str
+    directives: Dict[str, Any]
+    example_snippet: str
+
+
 GLOBAL_PERSONA = (
     "你是大学课程的智能讲解助手，负责把课件内容转化成自然、口头化的教学讲解，帮助学生理解知识而非逐页复述。"
 )
@@ -115,14 +123,10 @@ MISSING_RULE = "上下文缺失或证据不足时，直接写“此处待补充�
 EVIDENCE_RULE = "示例、比喻与数字必须来自现有上下文；若资料只有片段，请标注缺口而非臆造。"
 
 
-def build_style_instructions(detail_level: str, difficulty: str, language: str = "zh") -> str:
+def build_style_profile(detail_level: str, difficulty: str, language: str = "zh") -> StyleProfile:
     detail = DETAIL_POLICIES[detail_level]
     tone = TONE_POLICIES[difficulty]
-    language_instruction = (
-        "使用简体中文书写所有段落、 bullet 与占位符说明；如上下文为英文，也需翻译成中文保持统一。"
-        if language == "zh"
-        else "Write every paragraph, list item, and placeholder description in fluent English; translate any Chinese context instead of copying it verbatim."
-    )
+    language_instruction = _build_language_instruction(language)
     sections = [
         f"【角色设定】{GLOBAL_PERSONA}",
         f"【讲解顺序】{FLOW_INSTRUCTION}",
@@ -140,4 +144,118 @@ def build_style_instructions(detail_level: str, difficulty: str, language: str =
         f"【示例与依据】{EVIDENCE_RULE}",
         f"【语言】{language_instruction}",
     ]
-    return "\n".join(f"- {line}" for line in sections if line)
+    text = "\n".join(f"- {line}" for line in sections if line)
+    directives = _compose_directives(detail_level, difficulty, language)
+    example_snippet = _build_example_snippet(detail, tone, directives, language)
+    return StyleProfile(text=text, directives=directives, example_snippet=example_snippet)
+
+
+def build_style_instructions(detail_level: str, difficulty: str, language: str = "zh") -> str:
+    """
+    Backward compatible helper that exposes the legacy string instructions.
+    Code that only understands textual prompts can continue using this API,
+    while the new StyleProfile carries richer directives.
+    """
+    return build_style_profile(detail_level, difficulty, language).text
+
+
+def _build_language_instruction(language: str) -> str:
+    if language == "zh":
+        return (
+            "使用简体中文书写所有段落、 bullet 与占位符说明；如上下文为英文，也需翻译成中文保持统一。"
+        )
+    return (
+        "Write every paragraph, list item, and placeholder description in fluent English; "
+        "translate any Chinese context instead of copying it verbatim."
+    )
+
+
+def _compose_directives(detail_level: str, tone_level: str, language: str) -> Dict[str, Any]:
+    summary_mode = (
+        "none" if detail_level == "brief" else "takeaway" if detail_level == "medium" else "insight"
+    )
+    formula_mode = (
+        "light" if tone_level == "simple" else "balanced" if tone_level == "explanatory" else "extended"
+    )
+    return {
+        "detail_level": detail_level,
+        "tone": tone_level,
+        "language": language,
+        "summary_mode": summary_mode,
+        "use_table": detail_level != "brief",
+        "analogy_required": tone_level == "simple",
+        "formula_mode": formula_mode,
+        "formula_caption_scope": "contextual" if tone_level != "academic" else "rigorous",
+        "page_header_template": "### 第{page}页" if language == "zh" else "### Page {page}",
+        "blockquote_required": detail_level != "brief",
+        "require_summary": summary_mode != "none",
+        "validator": {
+            "ensure_page_headers": True,
+            "ensure_summary": summary_mode != "none",
+            "ensure_blockquote": detail_level != "brief",
+        },
+    }
+
+
+def _build_example_snippet(
+    detail: DetailPolicy, tone: TonePolicy, directives: Dict[str, Any], language: str
+) -> str:
+    header_template = directives.get("page_header_template", "### 第{page}页")
+    sample_header = header_template.format(page=3)
+    detail_label_en = {"brief": "concise", "medium": "balanced", "detailed": "in-depth"}
+    tone_label_en = {
+        "simple": "approachable",
+        "explanatory": "classroom-style",
+        "academic": "academic",
+    }
+    detail_adj = detail_label_en.get(directives.get("detail_level"), detail.label)
+    tone_adj = tone_label_en.get(directives.get("tone"), tone.label)
+    if language == "zh":
+        intro = "## 示例：多头注意力如何聚焦 (p.3-4)"
+        bullets = [
+            "- 先一句“人话”解释它为什么重要，再拆成概念与应用。",
+            "- 把 PPT bullet 改写成完整语句，并交代承上启下。",
+        ]
+        style_hint = f"*风格提示：保持「{detail.label}」篇幅和「{tone.label}」的叙述节奏。*"
+        analogy_line = "> 💡 打个比方：注意力像手电筒，会把光束集中在关键片段。"
+        table_header = "| 对比项 | 直觉 | 提示 |\n| --- | --- | --- |\n| Query | 要问的问题 | 代表当前词 |"
+        table_row = "| Key/Value | 候选信息 | 输出时作为权重参考 |"
+        formula_line = "$$a = \\frac{qk^T}{\\sqrt{d_k}}$$ —— 解释 q/k/d_k 分别表示当前词、检索词与维度。"
+        summary_takeaway = "> **一句话总结：** 聚焦 = 权重重分配。"
+        insight_line = "> **章节洞察：** 通过表格与公式说明了注意力兼顾直觉与推理。"
+        pending = "（请在正式输出中替换示例内容）"
+    else:
+        intro = "## Example: How multi-head attention focuses (p.3-4)"
+        bullets = [
+            "- Lead with the practical reason students should care before definitions.",
+            "- Rewrite deck bullets into flowing sentences with transitions.",
+        ]
+        style_hint = f"*Style cue: keep the notes {detail_adj} while sounding {tone_adj}.*"
+        analogy_line = "> 💡 Analogy: attention is a spotlight that sweeps over the canvas."
+        table_header = "| Aspect | Intuition | Tip |\n| --- | --- | --- |\n| Query | Question we ask | Current token |"
+        table_row = "| Key/Value | Candidate memory | Weight reference |"
+        formula_line = "$$a = \\frac{qk^T}{\\sqrt{d_k}}$$ — explain what each symbol captures."
+        summary_takeaway = "> **One-sentence takeaway:** Focus comes from re-weighting evidence."
+        insight_line = "> **Section insight:** Tables + formulas keep both intuition and rigor aligned."
+        pending = "(Replace placeholder text in real output.)"
+
+    snippet_parts = [intro, style_hint, sample_header]
+    snippet_parts.extend(bullets)
+
+    if directives.get("analogy_required"):
+        snippet_parts.append(analogy_line)
+
+    if directives.get("use_table"):
+        snippet_parts.extend([table_header, table_row])
+
+    if directives.get("formula_mode") == "extended":
+        snippet_parts.append(formula_line)
+
+    summary_mode = directives.get("summary_mode", "none")
+    if summary_mode == "takeaway":
+        snippet_parts.append(summary_takeaway)
+    elif summary_mode == "insight":
+        snippet_parts.append(insight_line)
+
+    snippet_parts.append(pending)
+    return "\n".join(snippet_parts).strip()

@@ -45,6 +45,30 @@
   margin-top: var(--space-4);
 }
 
+.note-section__body h3.page-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  margin-bottom: var(--space-2);
+}
+
+.note-section__body h3.page-heading .page-heading__title {
+  flex: 1;
+  min-width: 0;
+}
+
+.note-section__body h3.page-heading .page-heading__badge {
+  font-size: 0.85rem;
+  color: var(--color-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0.1rem 0.6rem;
+  margin-left: var(--space-3);
+  white-space: nowrap;
+}
+
 .note-section__body ul,
 .note-section__body ol {
   padding-left: 1.2rem;

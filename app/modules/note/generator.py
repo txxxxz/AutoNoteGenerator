@@ -4,13 +4,18 @@ import re
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from difflib import SequenceMatcher
+from html import escape
 from typing import Callable, Dict, List, Optional, Tuple
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.documents import Document
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.modules.note.llm_client import get_llm
-from app.modules.note.style_policies import build_style_instructions
+from app.modules.note.style_policies import (
+    StyleProfile,
+    build_style_instructions,
+    build_style_profile,
+)
 from app.schemas.common import (
     AnchorRef,
     LayoutDoc,
@@ -27,6 +32,14 @@ from app.utils.identifiers import new_id
 from app.utils.logger import logger
 from app.utils.outline import render_outline_markdown
 from app.utils.text import normalize_whitespace, take_sentences
+
+
+PAGE_HEADING_PATTERN = re.compile(
+    r"^(?P<leading>#{2,6})\s*"
+    r"(?:第\s*(?P<page_cn>\d+)\s*页|Page\s+(?P<page_en>\d+))"
+    r"(?:\s*[:：-]\s*(?P<rest>.*))?\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 
 class NoteGenerator:
@@ -79,26 +92,36 @@ class NoteGenerator:
         return page_text
 
     def _compose_block_context(self, section: OutlineNode, page_text_map: dict[int, str]) -> str:
+        """组织上下文，按页码顺序清晰呈现，方便LLM逐页讲解"""
         page_numbers = self._collect_pages(section)
         page_segments: List[str] = []
-        for page in page_numbers:
+        for page in sorted(page_numbers):
             content = page_text_map.get(page)
             if not content:
                 continue
-            page_segments.append(f"[Page {page}]\n{content}")
-        outline_notes = self._structure_outline_notes(section)
+            # 更清晰的页码标记，方便LLM识别
+            page_segments.append(f"=== 第{page}页 ===\n{content}")
+        
         summary = (section.summary or "").strip() or "暂无概述。"
         page_span = self._format_page_span(section)
+        
         parts = [
-            f"Section: {section.title}",
-            f"Pages: {page_span}",
-            f"Summary: {summary}",
-            "Semantic Outline:",
-            outline_notes or "- 无子结构",
+            f"【章节】{section.title}",
+            f"【页码范围】{page_span}",
+            f"【总体概述】{summary}",
         ]
+        
         if page_segments:
-            parts.append("Source Pages:")
+            parts.append("\n【逐页内容】")
             parts.append("\n\n".join(page_segments))
+        
+        # 如果有子章节结构，也提供参考
+        if section.children:
+            outline_notes = self._structure_outline_notes(section)
+            if outline_notes:
+                parts.append("\n【子章节结构参考】")
+                parts.append(outline_notes)
+        
         return "\n".join(parts).strip()
 
     def _collect_pages(self, section: OutlineNode) -> List[int]:
@@ -137,7 +160,28 @@ class NoteGenerator:
         language: str,
         progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
     ) -> NoteDoc:
-        style_instructions = build_style_instructions(detail_level, difficulty, language)
+        """
+        Stream a full note document with style-aware prompting.
+
+        The generator now consults StyleProfile directives to split system prompts,
+        assemble few-shot structural hints, and post-process the raw LLM output so
+        that headers、summaries、analogies、表格等可见结构会随着风格设置明显变化。
+        """
+        try:
+            style_profile = build_style_profile(detail_level, difficulty, language)
+        except KeyError as exc:
+            logger.warning(
+                "Unknown style tuple detail=%s tone=%s -> fallback instructions: %s",
+                detail_level,
+                difficulty,
+                exc,
+            )
+            fallback_text = build_style_instructions(detail_level, difficulty, language)
+            style_profile = StyleProfile(
+                text=fallback_text,
+                directives={"language": language, "summary_mode": "none"},
+                example_snippet="",
+            )
         enhanced_outline = self._build_natural_outline(layout_doc, outline)
         docs, section_contexts = self._build_semantic_documents(enhanced_outline, layout_doc)
         vector_store = load_or_create(session_id, docs, rebuild=True)
@@ -148,20 +192,39 @@ class NoteGenerator:
                     "You are StudyCompanion, tasked with generating structured course notes. "
                     "Adhere strictly to the provided outline and supplied context, and output "
                     "GitHub-flavoured Markdown only. "
-                    f"Write every heading, paragraph, bullet, formula, and annotation in {language_label}."
+                    f"Write every heading, paragraph, bullet, formula, and annotation in {language_label}. "
+                    "Respect style directives before answering any follow-up user nudge."
                 )
             ),
-            SystemMessage(content=f"写作规范如下，请逐条遵守：\n{style_instructions}"),
+            SystemMessage(content=f"请遵守以下风格规则：\n{style_profile.text}"),
         ]
+        if style_profile.example_snippet:
+            system_messages.append(
+                SystemMessage(
+                    content="以下示例展示了期望的 Markdown 节奏，请模仿结构：\n"
+                    f"{style_profile.example_snippet}"
+                )
+            )
         sections_to_render = self._flatten_outline(enhanced_outline)
         total_sections = len(sections_to_render)
+        
+        # 统计总页数
+        total_pages = sum(len(section.pages or []) for section in sections_to_render)
+        
         if progress_callback:
             progress_callback(
                 {
                     "phase": "prepare",
-                    "message": f"共 {total_sections} 个自然结构章节待生成…",
+                    "message": f"共 {total_sections} 个章节，覆盖 {total_pages} 页PPT，准备逐页讲解…",
                 }
             )
+        
+        logger.info(
+            "准备生成笔记: session_id=%s, 章节数=%d, 总页数=%d",
+            session_id,
+            total_sections,
+            total_pages
+        )
         if progress_callback:
             progress_callback({"phase": "sections_total", "total": total_sections})
         figures_by_page, equations_by_page = self._collect_assets(layout_doc)
@@ -176,7 +239,7 @@ class NoteGenerator:
         section_jobs: List[Tuple[int, OutlineNode, str, str]] = []
         for index, section in enumerate(sections_to_render, start=1):
             context_text = section_contexts.get(section.section_id, "")
-            prompt = self._build_prompt(section, style_instructions, context_text)
+            prompt = self._build_prompt(section, style_profile, context_text)
             section_jobs.append((index, section, prompt, context_text))
 
         def render_section(job: Tuple[int, OutlineNode, str, str]) -> Tuple[int, NoteSection]:
@@ -198,6 +261,9 @@ class NoteGenerator:
             except Exception as exc:  # pragma: no cover - network guard
                 logger.warning("LLM generation failed, using fallback: %s", exc)
                 markdown = self._fallback_section(section, context_text)
+            markdown = self._post_process_markdown(
+                markdown, section, style_profile.directives
+            )
             figures = self._resolve_figures(section, figures_by_page)
             equations = self._resolve_equations(section, equations_by_page)
             note_section = NoteSection(
@@ -246,38 +312,161 @@ class NoteGenerator:
             sections=sections,
         )
 
-    def _build_prompt(self, section: OutlineNode, style_instructions: str, context_text: str) -> str:
-        anchors_text = (
-            "\n".join(f"- 页 {anchor.page} · 锚点 {anchor.ref}" for anchor in section.anchors)
-            if section.anchors
-            else "- 无显式锚点，可结合上下文自由组织。"
-        )
-        structure_template = self._build_structure_template(section)
-        structure_notes = self._structure_outline_notes(section)
+    def _build_prompt(
+        self, section: OutlineNode, style_profile: StyleProfile, context_text: str
+    ) -> str:
+        directives = (style_profile.directives or {}) if style_profile else {}
         page_span = self._format_page_span(section)
+        pages = sorted(set(section.pages or []))
+        language = directives.get("language", "zh")
+        summary_mode = directives.get("summary_mode", "none")
+        header_template = directives.get("page_header_template", "### 第{page}页")
+        page_numbers = pages or [section.page_start or section.page_end or "?"]
+
+        if language == "zh":
+            heading_template = "## {title} ({page_span})"
+            task_intro = "【写作任务】按照 PPT 页码顺序，逐页详细讲解本章节内容。"
+            structure_label = "【必须遵循的逐页结构】"
+            requirements_label = "【写作要求】"
+            context_label = "【参考资料（按页组织）】"
+            section_label = "【章节标题】"
+            summary_label = "【总体概述】"
+            span_label = "【覆盖页码】"
+            summary_stub = "> **章节洞察：** 用 2-3 句话串联推理、限制与下一步提醒。"
+            concept_line = "- 核心概念/问题：用 2-3 句话点出动机与定义。"
+            detail_line = "- 推导、案例或应用：交代条件、步骤与用途。"
+            table_stub = "| 对比项 | 说明 | 提示 |\n| --- | --- | --- |\n| 示例 | 在此比较差异 | 应用线索 |"
+            analogy_stub = "> 💡 打个比方：……"
+            takeaway_stub = "> **一句话总结：** （填入 1 句 takeaway）"
+        else:
+            heading_template = "## {title} ({page_span})"
+            task_intro = "[Task] Walk through the PPT deck page by page so a student can follow without slides."
+            structure_label = "[Structure]"
+            requirements_label = "[Writing Requirements]"
+            context_label = "[Context grouped by page]"
+            section_label = "[Section]"
+            summary_label = "[Overview]"
+            span_label = "[Page span]"
+            summary_stub = "> **Section insight:** Capture the reasoning chain and next-step cues."
+            concept_line = "- Core idea / definition: explain why it matters first."
+            detail_line = "- Derivation / scenario: outline steps, assumptions, and usage."
+            table_stub = "| Aspect | Explanation | Tip |\n| --- | --- | --- |\n| Example | Compare the two ideas | Coach the reader |"
+            analogy_stub = "> 💡 Analogy: ..."
+            takeaway_stub = "> **One-sentence takeaway:** (fill in a one-line takeaway)"
+
+        page_structure_lines: List[str] = []
+        for page in page_numbers:
+            header = header_template.format(page=page)
+            per_page_lines = [header, concept_line, detail_line]
+            # 移除强制表格模板，让LLM根据内容自主选择
+            # if directives.get("use_table"):
+            #     per_page_lines.append(table_stub)
+            if directives.get("analogy_required"):
+                per_page_lines.append(analogy_stub)
+            if summary_mode == "takeaway":
+                per_page_lines.append(takeaway_stub)
+            page_structure_lines.append("\n".join(per_page_lines))
+
+        if summary_mode == "insight":
+            page_structure_lines.append(summary_stub)
+
+        page_template = "\n\n".join(page_structure_lines)
+
+        subsection_template = ""
+        if section.children:
+            label = "【子章节结构】" if language == "zh" else "[Sub-sections]"
+            subsection_template = f"\n\n{label}\n" + self._build_structure_template(section)
+
+        heading_line = heading_template.format(title=section.title, page_span=page_span)
+        base_requirements = (
+            [
+                f"1. 以 `{heading_line}` 作为章节大标题，并保持 Markdown 二级标题。",
+                "2. 严格按照上述页码顺序输出正文，确保每页至少 4-6 句完整讲解。",
+                "3. **智能选择格式**：根据内容特点，灵活使用段落、项目符号或表格。",
+                "   - **表格**：仅在需要对比多个项目（如优缺点、多种方法、特性对比）时使用。",
+                "   - **项目符号（-）**：用于罗列步骤、要点清单、多个独立概念。",
+                "   - **段落**：用于连贯的叙述、推导过程、概念解释。",
+                "4. 图片占位符使用 `[FIG_PAGE_<页号>_IDX_<序号>: 用途说明]` 并解释其含义。",
+                "5. 遇到公式时使用 `$`/`$$` 包裹，并逐个解释符号含义与适用条件。",
+            ]
+            if language == "zh"
+            else [
+                f"1. Begin with `{heading_line}` as the section H2 heading.",
+                "2. Follow the page order above; each page needs 4-6 flowing sentences.",
+                "3. **Choose format intelligently**: Use paragraphs, bullet points, or tables based on content logic.",
+                "   - **Tables**: Only when comparing multiple items (pros/cons, methods, features).",
+                "   - **Bullet points (-)**: For steps, checklists, or independent key points.",
+                "   - **Paragraphs**: For narrative explanations, derivations, or concept introductions.",
+                "4. Image placeholders must follow `[FIG_PAGE_<no>_IDX_<idx>: purpose]` and be interpreted in prose.",
+                "5. Wrap formulas with `$`/`$$` and describe each symbol plus its constraints.",
+            ]
+        )
+
+        directive_notes: List[str] = []
+        # 移除强制表格指令，改为在base_requirements中提供智能选择指南
+        # if directives.get("use_table"):
+        #     directive_notes.append(
+        #         "当同页出现多个概念时，以 Markdown 表格比较差异、优缺点。"
+        #         if language == "zh"
+        #         else "Insert a Markdown table whenever the page contrasts multiple ideas."
+        #     )
+        formula_mode = directives.get("formula_mode")
+        if formula_mode == "light":
+            directive_notes.append(
+                "公式只保留 1 个关键版本，并用口语解释它解决的问题。"
+                if language == "zh"
+                else "Only keep one key formula and explain the practical problem it solves."
+            )
+        elif formula_mode == "extended":
+            directive_notes.append(
+                "需要写出 2-3 句推理链，说明变量、假设与适用范围。"
+                if language == "zh"
+                else "Provide 2-3 sentences of reasoning to unpack variables, assumptions, and scope."
+            )
+        if directives.get("analogy_required"):
+            directive_notes.append(
+                "每页至少写一句“打个比方/换句话说”，帮助建立直觉。"
+                if language == "zh"
+                else "Each page should include an analogy or 'in other words' sentence."
+            )
+
+        if summary_mode == "insight":
+            directive_notes.append(
+                "章节末尾写 2-3 句洞察/下一步提示。"
+                if language == "zh"
+                else "Close with 2-3 sentences of section-level insight or next steps."
+            )
+
+        if directive_notes:
+            extra_header = "附加风格提示：" if language == "zh" else "Additional nudges:"
+            base_requirements.append(extra_header)
+            base_requirements.extend(f"- {note}" for note in directive_notes)
+
+        requirements_block = "\n".join(base_requirements)
+        section_summary = (section.summary or "").strip() or (
+            "暂无概述。" if language == "zh" else "No summary available."
+        )
+
+        closing = (
+            "请严格按照上述逐页结构输出完整讲解。"
+            if language == "zh"
+            else "Follow the structure above exactly and cover every listed page."
+        )
+
         return (
-            "【写作任务】根据给出的自然结构与参考资料，撰写完整章节讲解，禁止只复述大纲。\n"
-            f"【章节标题】{section.title}\n"
-            f"【章节概述】{section.summary}\n"
-            f"【覆盖页码】{page_span}\n"
-            f"【内容锚点】\n{anchors_text}\n\n"
-            "【必须遵循的 Markdown 结构】\n"
-            f"{structure_template}\n"
-            "以上每个标题都需要 2-3 句（或条）说明概念、推导、应用与总结，禁止新增/删改标题。\n\n"
-            "【结构提示】\n"
-            f"{structure_notes}\n\n"
-            "【写作风格】\n"
-            f"{style_instructions}\n\n"
-            "【参考上下文】\n"
+            f"{task_intro}\n\n"
+            f"{section_label}{section.title}\n"
+            f"{summary_label}{section_summary}\n"
+            f"{span_label}{page_span}\n\n"
+            f"{structure_label}\n"
+            f"{heading_line}\n\n"
+            f"{page_template}\n"
+            f"{subsection_template}\n\n"
+            f"{requirements_label}\n"
+            f"{requirements_block}\n\n"
+            f"{context_label}\n"
             f"{context_text}\n\n"
-            "【输出要求】\n"
-            "1. 输出以 `## {章节标题}` 开头，并按照结构顺序依次展开子标题；\n"
-            "2. 每个标题必须包含连续段落或 bullet 解释概念、推导、案例与注意事项；\n"
-            "3. 每个标题至少 2 句正文或等量内容，并写出承上启下的过渡语；\n"
-            "4. 图片/图表占位符使用 `[FIG_PAGE_<页号>_IDX_<序号>: 说明]` 并解释其作用；\n"
-            "5. 所有公式务必使用 `$$公式$$` 包裹，并解释符号含义与适用条件；\n"
-            "6. 最后一个子标题结尾补充 1-2 句总结或下一步提示。\n"
-            "请严格依据以上要求输出完整讲解。"
+            f"{closing}"
         )
 
     def _build_natural_outline(self, layout_doc: LayoutDoc, fallback: OutlineTree) -> OutlineTree:
@@ -394,17 +583,31 @@ class NoteGenerator:
         return 2
 
     def _titles_similar(self, left: str, right: str) -> bool:
+        """判断两个标题是否相似，用于智能合并相关页面"""
         if not left or not right:
             return False
         left_norm = normalize_whitespace(left).lower()
         right_norm = normalize_whitespace(right).lower()
+        
+        # 完全相同才合并
         if left_norm == right_norm:
             return True
-        left_key = left_norm.split(":")[0]
-        right_key = right_norm.split(":")[0]
-        if left_key and left_key == right_key:
+        
+        # 检查是否有相同的数字编号前缀（如 "1.1" "2.3.1"）
+        left_prefix = left_norm.split()[0] if left_norm.split() else ""
+        right_prefix = right_norm.split()[0] if right_norm.split() else ""
+        if left_prefix and right_prefix and re.match(r'^\d+(\.\d+)*$', left_prefix):
+            if left_prefix == right_prefix:
+                return True
+        
+        # 检查冒号前的关键词是否相同
+        left_key = left_norm.split(":")[0].strip()
+        right_key = right_norm.split(":")[0].strip()
+        if left_key and right_key and len(left_key) > 3 and left_key == right_key:
             return True
-        return SequenceMatcher(None, left_norm, right_norm).ratio() >= 0.88
+        
+        # 提高相似度阈值，避免过度合并不相关内容
+        return SequenceMatcher(None, left_norm, right_norm).ratio() >= 0.95
 
     def _extend_outline_node(self, node: OutlineNode, unit: dict) -> None:
         node.summary = self._merge_summary(node.summary, unit["summary"])
@@ -454,7 +657,18 @@ class NoteGenerator:
         return max(current, candidate)
 
     def _flatten_outline(self, outline: OutlineTree) -> List[OutlineNode]:
-        return [child for child in outline.root.children if child.title.strip()]
+        """扁平化大纲，只取顶层章节（每个章节内部会逐页讲解）"""
+        sections = []
+        for child in outline.root.children:
+            if child.title.strip():
+                sections.append(child)
+                # 确保 pages 字段包含所有子章节的页码
+                if child.children:
+                    all_pages = set(child.pages or [])
+                    for subchild in child.children:
+                        all_pages.update(subchild.pages or [])
+                    child.pages = sorted(all_pages)
+        return sections
 
     def _build_structure_template(self, section: OutlineNode) -> str:
         lines: List[str] = []
@@ -498,6 +712,175 @@ class NoteGenerator:
         context = context_text.splitlines()[:5]
         bullet_points = "\n".join(f"- {line}" for line in context if line.strip())
         return f"## {section.title}\n\n{section.summary}\n\n{bullet_points}"
+
+    def _post_process_markdown(
+        self, markdown: str, section: OutlineNode, directives: Dict[str, object]
+    ) -> str:
+        text = (markdown or "").strip()
+        if not directives:
+            return text
+        warnings: List[str] = []
+        text = self._ensure_page_headers(text, section, directives, warnings)
+        text = self._decorate_page_headers(text, section, directives)
+        text = self._ensure_summary_blocks(text, directives, warnings)
+        if directives.get("analogy_required"):
+            text = self._ensure_analogy(text, directives, warnings)
+        if directives.get("blockquote_required"):
+            text = self._ensure_blockquote(text, directives, warnings)
+        if warnings:
+            logger.debug(
+                "Post-processed section %s with style validators: %s",
+                section.section_id,
+                "; ".join(warnings),
+            )
+        return text
+
+    def _ensure_page_headers(
+        self,
+        text: str,
+        section: OutlineNode,
+        directives: Dict[str, object],
+        warnings: List[str],
+    ) -> str:
+        template = directives.get("page_header_template", "### 第{page}页")
+        language = directives.get("language", "zh")
+        pages = sorted(set(section.pages or []))
+        if not pages:
+            return text
+        placeholder = (
+            "> 待补充：补写这一页的细节。"
+            if language == "zh"
+            else "> TODO: fill in the explanation for this slide."
+        )
+        updated = text
+        for page in pages:
+            header = template.format(page=page)
+            pattern = rf"^{re.escape(header)}\b"
+            if not re.search(pattern, updated, flags=re.MULTILINE):
+                updated += f"\n\n{header}\n{placeholder}\n"
+                warnings.append(f"missing header {header}")
+        return updated
+
+    def _decorate_page_headers(
+        self, text: str, section: OutlineNode, directives: Dict[str, object]
+    ) -> str:
+        language = directives.get("language", "zh")
+        if not PAGE_HEADING_PATTERN.search(text):
+            return text
+        page_titles = self._map_page_outline_titles(section)
+
+        def replace(match: re.Match[str]) -> str:
+            page_token = match.group("page_cn") or match.group("page_en")
+            if not page_token or not page_token.isdigit():
+                return match.group(0)
+            page_no = int(page_token)
+            level = len(match.group("leading") or "###")
+            level = max(2, min(level, 5))
+            title = page_titles.get(page_no)
+            if not title:
+                title = (section.title or "").strip()
+            if not title:
+                title = f"第{page_no}页" if language == "zh" else f"Page {page_no}"
+            badge_label = f"第{page_no}页" if language == "zh" else f"Page {page_no}"
+            heading_html = (
+                f'<h{level} class="page-heading" data-page="{page_no}">'
+                f'<span class="page-heading__title">{escape(title)}</span>'
+                f'<span class="page-heading__badge">{escape(badge_label)}</span>'
+                f"</h{level}>"
+            )
+            return heading_html
+
+        return PAGE_HEADING_PATTERN.sub(replace, text)
+
+    def _map_page_outline_titles(self, section: OutlineNode) -> Dict[int, str]:
+        page_map: Dict[int, tuple[str, int]] = {}
+
+        def visit(node: OutlineNode, depth: int) -> None:
+            title = (node.title or "").strip()
+            pages = list(node.pages or [])
+            if not pages and node.page_start and node.page_end and node.page_start <= node.page_end:
+                pages = list(range(node.page_start, node.page_end + 1))
+            if not pages and node.anchors:
+                pages = [anchor.page for anchor in node.anchors]
+            if not pages:
+                pages = self._collect_pages(node)
+            pages = list(dict.fromkeys(pages))
+            if title and pages:
+                for page in pages:
+                    current = page_map.get(page)
+                    if not current or depth >= current[1]:
+                        page_map[page] = (title, depth)
+            for child in node.children:
+                visit(child, depth + 1)
+
+        visit(section, 1)
+        return {page: title for page, (title, _) in page_map.items()}
+
+    def _ensure_summary_blocks(
+        self, text: str, directives: Dict[str, object], warnings: List[str]
+    ) -> str:
+        summary_mode = directives.get("summary_mode")
+        if not summary_mode or summary_mode == "none":
+            return text
+        language = directives.get("language", "zh")
+        if summary_mode == "takeaway":
+            label = "一句话总结" if language == "zh" else "One-sentence takeaway"
+            pattern = label.lower()
+            haystack = text.lower()
+            if pattern not in haystack:
+                addition = (
+                    f"> **{label}：** 待补充。\n"
+                    if language == "zh"
+                    else f"> **{label}:** TODO.\n"
+                )
+                warnings.append("added takeaway summary")
+                return text + "\n\n" + addition
+            return text
+        if summary_mode == "insight":
+            label = "章节洞察" if language == "zh" else "Section insight"
+            if label.lower() not in text.lower():
+                addition = (
+                    f"> **{label}：** 补写 2-3 句串联洞察。\n"
+                    if language == "zh"
+                    else f"> **{label}:** Add 2-3 sentences summarising the reasoning.\n"
+                )
+                warnings.append("added insight summary")
+                return text + "\n\n" + addition
+        return text
+
+    def _ensure_analogy(
+        self, text: str, directives: Dict[str, object], warnings: List[str]
+    ) -> str:
+        language = directives.get("language", "zh")
+        haystack = text.lower()
+        tokens = (
+            ["打个比方", "换句话说", "比喻", "类比"]
+            if language == "zh"
+            else ["analogy", "metaphor", "imagine"]
+        )
+        if any(token.lower() in haystack for token in tokens):
+            return text
+        addition = (
+            "> 💡 打个比方：可以把本页内容类比成……（请补写比喻）。"
+            if language == "zh"
+            else "> 💡 Analogy: Describe how this concept mirrors a familiar scenario."
+        )
+        warnings.append("analogy placeholder injected")
+        return text + "\n\n" + addition + "\n"
+
+    def _ensure_blockquote(
+        self, text: str, directives: Dict[str, object], warnings: List[str]
+    ) -> str:
+        if re.search(r"^\s*>", text, flags=re.MULTILINE):
+            return text
+        language = directives.get("language", "zh")
+        addition = (
+            "> 重点提醒：在此写一句承上启下或注意事项。"
+            if language == "zh"
+            else "> Key reminder: add a bridging or caution sentence here."
+        )
+        warnings.append("blockquote placeholder injected")
+        return text + "\n\n" + addition + "\n"
 
     def _collect_assets(
         self, layout_doc: LayoutDoc
