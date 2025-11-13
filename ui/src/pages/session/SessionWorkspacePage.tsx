@@ -82,6 +82,17 @@ const SessionWorkspacePage = () => {
   const initialiseSession = useSessionState((state) => state.initialiseSession);
   const { pendingSection, startRegen, finishRegen } = useSectionRegen();
   const taskSourceRef = useRef<EventSource | null>(null);
+  const outlineTree = session?.outline;
+  const outlineNodeMap = useMemo(() => {
+    if (!outlineTree?.root) return new Map<string, OutlineNode>();
+    const map = new Map<string, OutlineNode>();
+    const visit = (node: OutlineNode) => {
+      map.set(node.section_id, node);
+      node.children?.forEach((child) => visit(child));
+    };
+    visit(outlineTree.root);
+    return map;
+  }, [outlineTree]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -159,42 +170,12 @@ const SessionWorkspacePage = () => {
   const mindmap: MindmapGraph | undefined = session?.mindmap;
 
   const tocItems = useMemo<TocItem[]>(() => {
-    const outline = session?.outline;
-    console.log('[DEBUG] tocItems生成:', {
-      hasOutline: !!outline,
-      hasRoot: !!outline?.root,
-      rootChildren: outline?.root?.children,
-      rootChildrenLength: outline?.root?.children?.length,
-      hasNoteDoc: !!noteDoc,
-      noteDocSectionsLength: noteDoc?.sections?.length
-    });
-    
-    // 打印 outline 的前几个子节点标题
-    if (outline?.root?.children?.length) {
-      console.log('[DEBUG] Outline前5个章节标题:', 
-        outline.root.children.slice(0, 5).map(child => ({
-          title: child.title,
-          level: child.level,
-          section_id: child.section_id
-        }))
-      );
-    }
-    
-    // 打印 noteDoc 的前几个 section 标题（如果存在）
-    if (noteDoc?.sections?.length) {
-      console.log('[DEBUG] NoteDoc前5个章节标题:', 
-        noteDoc.sections.slice(0, 5).map(section => ({
-          title: section.title,
-          section_id: section.section_id
-        }))
-      );
-    }
-    
-    if (outline?.root?.children?.length) {
+    if (outlineTree?.root?.children?.length) {
       const items: TocItem[] = [];
       const visit = (node: OutlineNode, numbering: string) => {
         const level = Math.min(Math.max(node.level || 1, 1), 5);
-        const title = `${numbering} ${node.title}`;
+        const displayNumber = numbering.endsWith('.') ? numbering : `${numbering}.`;
+        const title = `${displayNumber} ${node.title}`;
         items.push({
           id: node.section_id,
           title,
@@ -207,27 +188,33 @@ const SessionWorkspacePage = () => {
           });
         }
       };
-      outline.root.children.forEach((child, index) => {
-        visit(child, `${index + 1}.`);
+      outlineTree.root.children.forEach((child, index) => {
+        visit(child, `${index + 1}`);
       });
-      console.log('[DEBUG] 使用outline生成tocItems (前5项):', items.slice(0, 5));
       return items;
     }
     if (!noteDoc) return [];
-    const fallbackItems = noteDoc.sections.map((section, index) => ({
+    return noteDoc.sections.map((section, index) => ({
       id: section.section_id,
       title: `${index + 1}. ${section.title}`,
       level: 1,
       targetId: section.section_id
     }));
-    console.log('[DEBUG] 使用noteDoc生成tocItems (fallback, 前5项):', fallbackItems.slice(0, 5));
-    return fallbackItems;
-  }, [session?.outline, noteDoc]);
+  }, [outlineTree, noteDoc]);
 
   const scrollTargets = useMemo(() => {
+    if (outlineTree?.root?.children?.length) {
+      const ids: string[] = [];
+      const visit = (node: OutlineNode) => {
+        ids.push(node.section_id);
+        node.children?.forEach((child) => visit(child));
+      };
+      outlineTree.root.children.forEach((child) => visit(child));
+      return ids;
+    }
     if (!noteDoc) return [];
     return noteDoc.sections.map((section) => section.section_id);
-  }, [noteDoc]);
+  }, [outlineTree, noteDoc]);
 
   const { activeId, setActiveId } = useScrollSync(scrollTargets);
 
@@ -569,6 +556,7 @@ const SessionWorkspacePage = () => {
               <ContentSection
                 key={section.section_id}
                 section={section}
+                outlineNode={outlineNodeMap.get(section.section_id)}
                 pending={pendingSection === section.section_id || session?.generating}
                 onRegenerate={handleRegenSection}
               />

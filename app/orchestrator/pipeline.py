@@ -347,11 +347,15 @@ class CourseSessionPipeline:
         return LayoutDoc(**payload)
 
     def _load_outline(self) -> OutlineTree:
-        payload = repository.load_artifact(f"outline_{self.session_id}")
+        outline_id = f"outline_{self.session_id}"
+        logger.info("尝试加载 outline: artifact_id=%s", outline_id)
+        payload = repository.load_artifact(outline_id)
         if not payload:
-            logger.warning("outline 缓存缺失，重新生成: session_id=%s", self.session_id)
+            logger.warning("⚠️ outline 缓存缺失，重新生成: session_id=%s artifact_id=%s", self.session_id, outline_id)
             outline = self.build_outline()
+            logger.info("✅ outline 重新生成完成，children=%d", len(outline.root.children))
             return outline
+        logger.info("✅ 成功加载缓存的 outline，children=%d", len(payload.get("root", {}).get("children", [])))
         return OutlineTree(**payload)
 
     def _load_note(self, note_doc_id: str) -> NoteDoc:

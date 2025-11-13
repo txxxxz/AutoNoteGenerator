@@ -7,7 +7,6 @@ from difflib import SequenceMatcher
 from typing import Callable, Dict, List, Optional, Tuple
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_text_splitters import TokenTextSplitter
 from langchain_core.documents import Document
 
 from app.modules.note.llm_client import get_llm
@@ -36,36 +35,97 @@ class NoteGenerator:
         self.chunk_overlap = chunk_overlap
         self.max_workers = max(1, max_workers)
 
-    def _build_documents(self, layout_doc: LayoutDoc) -> List[Document]:
+    # --- 语义 RAG 数据库构建 ---
+    def _build_semantic_documents(
+        self, outline: OutlineTree, layout_doc: LayoutDoc
+    ) -> tuple[List[Document], dict[str, str]]:
+        page_text_map = self._extract_page_text(layout_doc)
         documents: List[Document] = []
-        for page in layout_doc.pages:
-            content_segments = []
-            for element in page.elements:
-                if element.content:
-                    content_segments.append(element.content)
-                if element.caption:
-                    content_segments.append(f"{element.kind.value.title()}说明: {element.caption}")
-                if element.latex:
-                    content_segments.append(f"公式: {element.latex}")
-            joined = "\n".join(content_segments).strip()
-            if not joined:
-                continue
+        section_contexts: dict[str, str] = {}
+        for section in outline.root.children:
+            context_text = self._compose_block_context(section, page_text_map)
+            metadata = {
+                "section_id": section.section_id,
+                "title": section.title,
+                "page_span": self._format_page_span(section),
+                "page_start": section.page_start,
+                "page_end": section.page_end,
+            }
+            documents.append(Document(page_content=context_text, metadata=metadata))
+            section_contexts[section.section_id] = context_text
+        if not documents:
             documents.append(
                 Document(
-                    page_content=joined,
-                    metadata={"page_no": page.page_no},
+                    page_content="文档暂无可用内容。",
+                    metadata={"section_id": "fallback", "title": "Empty"},
                 )
             )
-        if not documents:
-            documents.append(Document(page_content="暂无内容。", metadata={"page_no": 0}))
-        splitter = TokenTextSplitter(
-            chunk_size=self.chunk_size,
-            chunk_overlap=self.chunk_overlap,
-        )
-        chunks: List[Document] = []
-        for doc in documents:
-            chunks.extend(splitter.split_documents([doc]))
-        return chunks
+        return documents, section_contexts
+
+    def _extract_page_text(self, layout_doc: LayoutDoc) -> dict[int, str]:
+        page_text: dict[int, str] = {}
+        for page in layout_doc.pages:
+            segments: List[str] = []
+            for element in page.elements:
+                if element.content:
+                    segments.append(element.content.strip())
+                if element.caption:
+                    segments.append(f"{element.kind.value}说明: {element.caption.strip()}")
+                if element.latex:
+                    segments.append(f"公式: {element.latex.strip()}")
+            joined = "\n".join(seg for seg in segments if seg).strip()
+            if joined:
+                page_text[page.page_no] = joined
+        return page_text
+
+    def _compose_block_context(self, section: OutlineNode, page_text_map: dict[int, str]) -> str:
+        page_numbers = self._collect_pages(section)
+        page_segments: List[str] = []
+        for page in page_numbers:
+            content = page_text_map.get(page)
+            if not content:
+                continue
+            page_segments.append(f"[Page {page}]\n{content}")
+        outline_notes = self._structure_outline_notes(section)
+        summary = (section.summary or "").strip() or "暂无概述。"
+        page_span = self._format_page_span(section)
+        parts = [
+            f"Section: {section.title}",
+            f"Pages: {page_span}",
+            f"Summary: {summary}",
+            "Semantic Outline:",
+            outline_notes or "- 无子结构",
+        ]
+        if page_segments:
+            parts.append("Source Pages:")
+            parts.append("\n\n".join(page_segments))
+        return "\n".join(parts).strip()
+
+    def _collect_pages(self, section: OutlineNode) -> List[int]:
+        pages = list(section.pages or [])
+        for anchor in section.anchors:
+            pages.append(anchor.page)
+        for child in section.children:
+            pages.extend(self._collect_pages(child))
+        deduped: List[int] = []
+        seen = set()
+        for page in pages:
+            if page in seen:
+                continue
+            seen.add(page)
+            deduped.append(page)
+        return sorted(deduped)
+
+    def _format_page_span(self, section: OutlineNode) -> str:
+        start = section.page_start or (section.pages[0] if section.pages else None)
+        end = section.page_end or (section.pages[-1] if section.pages else None)
+        if start and end:
+            if start == end:
+                return f"p.{start}"
+            return f"p.{start}–{end}"
+        if start:
+            return f"p.{start}"
+        return "p.?–?"
 
     def generate(
         self,
@@ -78,16 +138,21 @@ class NoteGenerator:
         progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
     ) -> NoteDoc:
         style_instructions = build_style_instructions(detail_level, difficulty, language)
-        docs = self._build_documents(layout_doc)
-        vector_store = load_or_create(session_id, docs)
-        language_label = "Simplified Chinese" if language == "zh" else "English"
-        system_prompt = (
-            "You are StudyCompanion, tasked with generating structured course notes. "
-            "You must adhere to the provided outline, respect the style instructions, "
-            "and reference the supplied context. Output in GitHub-flavoured Markdown. "
-            f"Write every heading, sentence, and annotation in {language_label}."
-        )
         enhanced_outline = self._build_natural_outline(layout_doc, outline)
+        docs, section_contexts = self._build_semantic_documents(enhanced_outline, layout_doc)
+        vector_store = load_or_create(session_id, docs, rebuild=True)
+        language_label = "Simplified Chinese" if language == "zh" else "English"
+        system_messages = [
+            SystemMessage(
+                content=(
+                    "You are StudyCompanion, tasked with generating structured course notes. "
+                    "Adhere strictly to the provided outline and supplied context, and output "
+                    "GitHub-flavoured Markdown only. "
+                    f"Write every heading, paragraph, bullet, formula, and annotation in {language_label}."
+                )
+            ),
+            SystemMessage(content=f"写作规范如下，请逐条遵守：\n{style_instructions}"),
+        ]
         sections_to_render = self._flatten_outline(enhanced_outline)
         total_sections = len(sections_to_render)
         if progress_callback:
@@ -110,7 +175,7 @@ class NoteGenerator:
 
         section_jobs: List[Tuple[int, OutlineNode, str, str]] = []
         for index, section in enumerate(sections_to_render, start=1):
-            context_text = self._retrieve_context(vector_store, section, docs)
+            context_text = section_contexts.get(section.section_id, "")
             prompt = self._build_prompt(section, style_instructions, context_text)
             section_jobs.append((index, section, prompt, context_text))
 
@@ -128,9 +193,7 @@ class NoteGenerator:
                 )
             llm = get_llm(temperature=0.2)
             try:
-                response = llm.invoke(
-                    [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
-                )
+                response = llm.invoke([*system_messages, HumanMessage(content=prompt)])
                 markdown = getattr(response, "content", str(response))
             except Exception as exc:  # pragma: no cover - network guard
                 logger.warning("LLM generation failed, using fallback: %s", exc)
@@ -183,28 +246,6 @@ class NoteGenerator:
             sections=sections,
         )
 
-    def _retrieve_context(self, vector_store, section: OutlineNode, docs: List[Document]) -> str:
-        if not section.anchors:
-            top_docs = vector_store.similarity_search(section.summary, k=3)
-        else:
-            top_docs = []
-            for anchor in section.anchors:
-                matches = vector_store.similarity_search(
-                    f"Page {anchor.page} content related to {section.title}", k=1
-                )
-                top_docs.extend(matches)
-            if not top_docs:
-                top_docs = vector_store.similarity_search(section.summary, k=3)
-        unique_texts = []
-        seen = set()
-        for doc in top_docs:
-            text = doc.page_content.strip()
-            if text not in seen:
-                unique_texts.append(text)
-                seen.add(text)
-        return "\n\n".join(unique_texts[:3])
-
-  
     def _build_prompt(self, section: OutlineNode, style_instructions: str, context_text: str) -> str:
         anchors_text = (
             "\n".join(f"- 页 {anchor.page} · 锚点 {anchor.ref}" for anchor in section.anchors)
@@ -213,28 +254,35 @@ class NoteGenerator:
         )
         structure_template = self._build_structure_template(section)
         structure_notes = self._structure_outline_notes(section)
+        page_span = self._format_page_span(section)
         return (
-            "你是一名大学课程讲师，请根据给定的自然章节结构写出完整讲解。\n"
-            f"章节标题：{section.title}\n"
-            f"章节概述：{section.summary}\n"
-            f"内容锚点：\n{anchors_text}\n\n"
-            "结构树（禁止新增/删减/改名标题，必须依次输出并在标题下填写内容）：\n"
-            f"{structure_template}\n\n"
-            "结构提示（供参考，可融入过渡语和段落）：\n"
+            "【写作任务】根据给出的自然结构与参考资料，撰写完整章节讲解，禁止只复述大纲。\n"
+            f"【章节标题】{section.title}\n"
+            f"【章节概述】{section.summary}\n"
+            f"【覆盖页码】{page_span}\n"
+            f"【内容锚点】\n{anchors_text}\n\n"
+            "【必须遵循的 Markdown 结构】\n"
+            f"{structure_template}\n"
+            "以上每个标题都需要 2-3 句（或条）说明概念、推导、应用与总结，禁止新增/删改标题。\n\n"
+            "【结构提示】\n"
             f"{structure_notes}\n\n"
-            f"写作风格设定：\n{style_instructions}\n\n"
-            "写作要求：\n"
-            "1. 以“概念 → 推导/论证 → 应用/案例 → 小结”的顺序组织内容，必要时显式说明过渡语；\n"
-            "2. 对图片/公式引用使用占位符 `[FIG_PAGE_<页号>_IDX_<序号>: 说明]` 并解释其作用；\n"
-            "3. 输出须以 `## {章节标题}` 开头，并严格沿用上述结构树中列出的标题层级；\n"
-            "4. 禁止创建未在结构树中的标题或更改标题文字，可在标题下使用段落或 bullet；\n"
-            "5. 避免原文粘贴或冗余页码，所有陈述都要结合上下文重写；\n"
-            "6. 结尾在最后一个标题下用 1-2 句总结本节核心思想。\n\n"
-            f"可用上下文：\n{context_text}\n\n"
-            "请基于上述信息生成结构清晰、连贯的讲解。"
+            "【写作风格】\n"
+            f"{style_instructions}\n\n"
+            "【参考上下文】\n"
+            f"{context_text}\n\n"
+            "【输出要求】\n"
+            "1. 输出以 `## {章节标题}` 开头，并按照结构顺序依次展开子标题；\n"
+            "2. 每个标题必须包含连续段落或 bullet 解释概念、推导、案例与注意事项；\n"
+            "3. 每个标题至少 2 句正文或等量内容，并写出承上启下的过渡语；\n"
+            "4. 图片/图表占位符使用 `[FIG_PAGE_<页号>_IDX_<序号>: 说明]` 并解释其作用；\n"
+            "5. 所有公式务必使用 `$$公式$$` 包裹，并解释符号含义与适用条件；\n"
+            "6. 最后一个子标题结尾补充 1-2 句总结或下一步提示。\n"
+            "请严格依据以上要求输出完整讲解。"
         )
 
     def _build_natural_outline(self, layout_doc: LayoutDoc, fallback: OutlineTree) -> OutlineTree:
+        if fallback.root.children:
+            return self._ensure_outline_markdown(fallback)
         try:
             page_units = self._extract_page_units(layout_doc)
             if not page_units:
@@ -268,6 +316,9 @@ class NoteGenerator:
                     anchors=list(unit["anchors"]),
                     level=level,
                     children=[],
+                    pages=list(unit["pages"]),
+                    page_start=unit["page_start"],
+                    page_end=unit["page_end"],
                 )
                 siblings.append(node)
                 if parent:
@@ -318,6 +369,9 @@ class NoteGenerator:
                     "summary": summary,
                     "anchors": anchors[:6] or [AnchorRef(page=page.page_no, ref=f"page-{page.page_no}")],
                     "level": level,
+                    "pages": [page.page_no],
+                    "page_start": page.page_no,
+                    "page_end": page.page_no,
                 }
             )
         return units
@@ -354,6 +408,13 @@ class NoteGenerator:
 
     def _extend_outline_node(self, node: OutlineNode, unit: dict) -> None:
         node.summary = self._merge_summary(node.summary, unit["summary"])
+        combined_pages = list(node.pages or [])
+        for page in unit.get("pages", []):
+            if page not in combined_pages:
+                combined_pages.append(page)
+        node.pages = combined_pages
+        node.page_start = self._min_page(node.page_start, unit.get("page_start"))
+        node.page_end = self._max_page(node.page_end, unit.get("page_end"))
         existing = {(anchor.page, anchor.ref) for anchor in node.anchors}
         for anchor in unit["anchors"]:
             key = (anchor.page, anchor.ref)
@@ -378,15 +439,21 @@ class NoteGenerator:
             return ""
         return take_sentences(merged, 3)[:320] or merged[:320]
 
+    def _min_page(self, current: Optional[int], candidate: Optional[int]) -> Optional[int]:
+        if current is None:
+            return candidate
+        if candidate is None:
+            return current
+        return min(current, candidate)
+
+    def _max_page(self, current: Optional[int], candidate: Optional[int]) -> Optional[int]:
+        if current is None:
+            return candidate
+        if candidate is None:
+            return current
+        return max(current, candidate)
+
     def _flatten_outline(self, outline: OutlineTree) -> List[OutlineNode]:
-        sections: List[OutlineNode] = []
-
-        def visit(node: OutlineNode) -> None:
-            if node.summary.strip() or node.anchors:
-                sections.append(node)
-            for child in node.children:
-                visit(child)
-
         return [child for child in outline.root.children if child.title.strip()]
 
     def _build_structure_template(self, section: OutlineNode) -> str:
@@ -408,10 +475,11 @@ class NoteGenerator:
         def visit(node: OutlineNode, depth: int = 0) -> None:
             indent = "  " * depth
             summary = (node.summary or "").strip()
+            page_span = self._format_page_span(node)
             if summary:
-                notes.append(f"{indent}- {node.title}: {summary}")
+                notes.append(f"{indent}- {node.title} ({page_span}): {summary}")
             else:
-                notes.append(f"{indent}- {node.title}: 待补充")
+                notes.append(f"{indent}- {node.title} ({page_span}): 待补充")
             for child in node.children:
                 visit(child, depth + 1)
 
@@ -429,7 +497,7 @@ class NoteGenerator:
     def _fallback_section(self, section: OutlineNode, context_text: str) -> str:
         context = context_text.splitlines()[:5]
         bullet_points = "\n".join(f"- {line}" for line in context if line.strip())
-        return f"### {section.title}\n\n{section.summary}\n\n{bullet_points}"
+        return f"## {section.title}\n\n{section.summary}\n\n{bullet_points}"
 
     def _collect_assets(
         self, layout_doc: LayoutDoc

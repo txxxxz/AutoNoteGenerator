@@ -68,6 +68,9 @@ class OutlineNode(BaseModel):
     anchors: List[AnchorRef] = Field(default_factory=list)
     children: List["OutlineNode"] = Field(default_factory=list)
     level: int = 0
+    pages: List[int] = Field(default_factory=list)
+    page_start: Optional[int] = None
+    page_end: Optional[int] = None
 
     model_config = {
         "json_encoders": {BlockType: lambda v: v.value},

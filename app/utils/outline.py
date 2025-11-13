@@ -40,7 +40,7 @@ class ParsedHeading:
 
 
 HEADING_RE = re.compile(r"^(#{1,5})\s+(.*)$")
-PAGES_RE = re.compile(r"\(pages?:\s*([^)]+)\)\s*$", re.IGNORECASE)
+PAGES_RE = re.compile(r"\((?:pages?|p)\.?\s*[:：]?\s*([^)]+)\)\s*$", re.IGNORECASE)
 SUMMARY_RE = re.compile(r"^>\s*(.+)$")
 
 
@@ -102,8 +102,9 @@ def _expand_page_spec(spec: str) -> List[int]:
         token = token.strip()
         if not token:
             continue
-        if "-" in token:
-            start_str, end_str = token.split("-", 1)
+        normalized = token.replace("–", "-").replace("—", "-")
+        if "-" in normalized:
+            start_str, end_str = normalized.split("-", 1)
             if start_str.isdigit() and end_str.isdigit():
                 start = int(start_str)
                 end = int(end_str)
@@ -112,8 +113,8 @@ def _expand_page_spec(spec: str) -> List[int]:
                 else:
                     pages.extend(range(end, start + 1))
             continue
-        if token.isdigit():
-            pages.append(int(token))
+        if normalized.isdigit():
+            pages.append(int(normalized))
     # Deduplicate while preserving order
     seen = set()
     unique_pages = []

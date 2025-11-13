@@ -1,21 +1,76 @@
+import { useEffect, useMemo, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+import rehypeRaw from 'rehype-raw';
 import classNames from 'classnames';
 
-import { NoteSection } from '../../api/types';
+import { NoteSection, OutlineNode } from '../../api/types';
 import '../../styles/note-section.css';
 
 type NoteSectionViewProps = {
   section: NoteSection;
   pending?: boolean;
   onRegenerate?: (sectionId: string) => void;
+  outlineNode?: OutlineNode;
 };
 
-const NoteSectionView = ({ section, pending, onRegenerate }: NoteSectionViewProps) => {
+type HeadingAnchor = {
+  id: string;
+  level: number;
+};
+
+const clampHeadingLevel = (level?: number | null) => {
+  const normalized = typeof level === 'number' && level > 0 ? level : 2;
+  return Math.min(5, Math.max(2, normalized));
+};
+
+const collectHeadingAnchors = (node?: OutlineNode | null): HeadingAnchor[] => {
+  if (!node) return [];
+  const anchors: HeadingAnchor[] = [];
+  const visit = (current: OutlineNode) => {
+    anchors.push({ id: current.section_id, level: clampHeadingLevel(current.level) });
+    current.children?.forEach((child) => visit(child));
+  };
+  visit(node);
+  return anchors.slice(1); // 顶层节点使用外层 section anchor
+};
+
+const NoteSectionView = ({ section, pending, onRegenerate, outlineNode }: NoteSectionViewProps) => {
+  const bodyRef = useRef<HTMLElement | null>(null);
+  const headingAnchors = useMemo(() => collectHeadingAnchors(outlineNode), [outlineNode]);
+
+  useEffect(() => {
+    const container = bodyRef.current;
+    if (!container || !headingAnchors.length) {
+      return;
+    }
+    const anchorsByLevel = headingAnchors.reduce<Record<number, HeadingAnchor[]>>((acc, anchor) => {
+      if (!acc[anchor.level]) {
+        acc[anchor.level] = [];
+      }
+      acc[anchor.level].push(anchor);
+      return acc;
+    }, {});
+    const headings = container.querySelectorAll('h2, h3, h4, h5');
+    headings.forEach((heading) => {
+      const level = Number(heading.tagName.replace(/\D/g, '')) || 2;
+      const queue = anchorsByLevel[level];
+      if (queue && queue.length) {
+        const anchor = queue.shift()!;
+        heading.setAttribute('id', anchor.id);
+        heading.setAttribute('data-section-id', anchor.id);
+      }
+    });
+  }, [headingAnchors, section.body_md, section.section_id]);
+
   return (
-    <section className={classNames('note-section', { pending })} data-section-id={section.section_id}>
+    <section
+      className={classNames('note-section', { pending })}
+      data-section-id={section.section_id}
+      id={section.section_id}
+    >
       <header className="note-section__header">
         <h2>{section.title}</h2>
         <div className="note-section__actions">
@@ -28,13 +83,17 @@ const NoteSectionView = ({ section, pending, onRegenerate }: NoteSectionViewProp
           </button>
         </div>
       </header>
-      <article className="note-section__body">
+      <article className="note-section__body" ref={bodyRef}>
         {pending ? (
           <div className="note-section__skeleton" aria-live="polite">
             正在重新生成...
           </div>
         ) : (
-          <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkMath]}
+            rehypePlugins={[rehypeKatex, rehypeRaw]}
+            skipHtml={false}
+          >
             {section.body_md}
           </ReactMarkdown>
         )}

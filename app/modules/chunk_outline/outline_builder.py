@@ -56,35 +56,33 @@ class OutlineBuilder:
             clipped_stream = clipped_stream[:max_chars] + "\n...[内容截断，后续页略]..."
 
         system_prompt = (
-            "你是一名课程设计专家，负责将课堂PPT内容重组为符合学习逻辑的知识结构大纲。"
-            "你的目标是帮助学生理解复杂知识，而不是机械地摘要或按页罗列。"
+            "你是一名课程设计专家，负责让大学课程材料转化为有逻辑、可教学的知识大纲。"
+            "你的目标是帮助学生建立语义结构，而不是按页罗列摘要。"
         )
 
         user_prompt = (
-            "请根据以下课件文字，输出一个**自然结构的教学大纲**。\n\n"
-            "### 任务目标\n"
-            "1. 按**知识逻辑**组织章节，而不是按页码顺序。\n"
-            "2. 每个章节标题要使用自然语言短句，例如“为什么需要粒子滤波”或“改进重采样的思路”。\n"
-            "3. 大纲最多四级标题（# 至 ####），层级要体现从概念→方法→问题→解决的递进。\n"
-            "4. 每个一级或二级标题下，用 `> Summary:` 写1–2句学习目标。\n"
-            "5. 可以在标题末尾加上 `(pages: x–y)` 表示主要来源页码，但页码只作参考。\n"
-            "6. 章节总数建议在 3–8 个之间，每个一级章节下不超过三层子标题。\n"
-            "7. 输出纯 Markdown，不要解释或前言。\n\n"
-            "### 输出示例\n"
+            "请通读以下课件文本，生成**自然结构的 Markdown 大纲**。\n\n"
+            "### 强制要求\n"
+            "1. 课件内容使用 `<<PAGE n>>` 标识页码，请根据这些标记推断范围；\n"
+            "2. 顶层标题必须以 `##` 开始，最多细化到 `#####`，禁止使用 `#`；\n"
+            "3. 每个标题后追加 `(p.x–y)` 或 `(p.x)`，表示该部分覆盖的 PDF 页码范围；\n"
+            "4. 依据语义/逻辑组织章节，而非逐页罗列；\n"
+            "5. 在每个标题正下方写一行 `> Summary:`，概述 1–2 句学习目标；\n"
+            "6. 一级章节建议 3–8 个，并涵盖所有重要内容，子层级不超过五级；\n"
+            "7. 输出纯 Markdown，不要额外解释或注释。\n\n"
+            "### 示例结构\n"
             "```\n"
-            "# 粒子滤波的基本思想 (pages: 2–5)\n"
-            "> Summary: 理解如何通过采样近似概率分布，并区分预测与更新两步。\n\n"
-            "## 状态估计的核心问题\n"
-            "> Summary: 说明为什么传统卡尔曼滤波不适用于非线性系统。\n\n"
-            "### 预测步骤\n"
-            "- 根据运动模型生成粒子，模拟系统动态。\n\n"
-            "### 更新步骤\n"
-            "- 利用观测模型修正权重，实现后验估计。\n\n"
-            "# 实际问题与改进策略 (pages: 8–14)\n"
-            "> Summary: 探讨粒子退化、粒子饥饿等常见问题及其解决方案。\n"
+            "## 算法 1：线性回归 (p.3–10)\n"
+            "> Summary: 给出线性回归的基本假设、损失函数与直觉。 \n"
+            "### 概念与直觉 (p.3–4)\n"
+            "> Summary: 使用数据点和超平面关系介绍问题。 \n"
+            "#### 推导流程 (p.4–6)\n"
+            "> Summary: 详细说明最小二乘推导、矩阵形式与几何解释。 \n"
+            "##### 应用示例 (p.7)\n"
+            "> Summary: 将模型套用到房价预测。 \n"
             "```\n\n"
-            f"### 输入\n课程主题：{title}\n\n课件内容：\n{text_stream}\n\n"
-            "请输出重组后的教学大纲（纯 Markdown）："
+            f"### 输入\n课程主题：{title}\n\n课件内容（含页码标记）：\n{text_stream}\n\n"
+            "请输出满足上述要求的 Markdown 大纲："
         )
 
         try:
@@ -131,12 +129,18 @@ class OutlineBuilder:
 
         for heading in headings:
             anchors = self._resolve_anchors(heading.pages, layout_doc)
+            pages = heading.pages or [anchor.page for anchor in anchors]
+            page_start = min(pages) if pages else None
+            page_end = max(pages) if pages else None
             node = OutlineNode(
                 section_id=new_id("s"),
                 title=heading.title,
                 summary=heading.summary,
                 anchors=anchors,
                 level=heading.level,
+                pages=pages,
+                page_start=page_start,
+                page_end=page_end,
                 children=[],
             )
             while stack and stack[-1].level >= node.level:
@@ -188,6 +192,9 @@ class OutlineBuilder:
                     summary=summary,
                     anchors=anchors,
                     level=1,
+                    pages=[page.page_no],
+                    page_start=page.page_no,
+                    page_end=page.page_no,
                     children=[],
                 )
             )

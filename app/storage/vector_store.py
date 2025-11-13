@@ -21,9 +21,15 @@ def _session_path(session_id: str) -> Path:
     return VECTOR_ROOT / f"{session_id}.faiss"
 
 
-def load_or_create(session_id: str, docs: Optional[Iterable[Document]] = None) -> FAISS:
+def load_or_create(
+    session_id: str, docs: Optional[Iterable[Document]] = None, rebuild: bool = False
+) -> FAISS:
     path = _session_path(session_id)
-    if path.exists() and (path.with_suffix(".pkl")).exists():
+    if (
+        path.exists()
+        and (path.with_suffix(".pkl")).exists()
+        and not rebuild
+    ):
         return FAISS.load_local(
             str(path),
             get_embedding_model(),
