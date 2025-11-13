@@ -5,6 +5,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from difflib import SequenceMatcher
 from html import escape
+import threading
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from langchain_core.documents import Document
@@ -17,6 +18,7 @@ from app.modules.note.style_policies import (
     build_style_profile,
 )
 from app.schemas.common import (
+    BlockType,
     AnchorRef,
     LayoutDoc,
     LayoutElement,
@@ -27,6 +29,7 @@ from app.schemas.common import (
     OutlineNode,
     OutlineTree,
 )
+from app.storage import assets
 from app.storage.vector_store import load_or_create, save
 from app.utils.identifiers import new_id
 from app.utils.logger import logger
@@ -52,6 +55,7 @@ class NoteGenerator:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.max_workers = max(1, max_workers)
+        self._figure_lock = threading.Lock()
 
     # --- 语义 RAG 数据库构建 ---
     def _build_semantic_documents(
@@ -171,6 +175,7 @@ class NoteGenerator:
         difficulty: str,
         language: str,
         progress_callback: Optional[Callable[[Dict[str, object]], None]] = None,
+        source_pdf_path: Optional[str] = None,
     ) -> NoteDoc:
         """
         Stream a full note document with style-aware prompting.
@@ -277,7 +282,10 @@ class NoteGenerator:
                 markdown, section, style_profile.directives
             )
             markdown, inline_figures = self._inject_inline_figures(
-                markdown, figures_by_page
+                markdown,
+                figures_by_page,
+                session_id,
+                source_pdf_path,
             )
             figures = self._resolve_figures(section, figures_by_page, inline_figures)
             equations = self._resolve_equations(section, equations_by_page)
@@ -914,6 +922,8 @@ class NoteGenerator:
         self,
         markdown: str,
         figures_by_page: Dict[int, List[LayoutElement]],
+        session_id: str,
+        source_pdf_path: Optional[str],
     ) -> Tuple[str, Set[Tuple[int, int]]]:
         if not markdown:
             return markdown, set()
@@ -928,6 +938,19 @@ class NoteGenerator:
                 return match.group(0)
             label = (match.group("label") or "").strip()
             element = self._lookup_figure_element(page_no, idx, figures_by_page)
+            if (not element or not element.image_uri) and source_pdf_path:
+                with self._figure_lock:
+                    refreshed = self._lookup_figure_element(page_no, idx, figures_by_page)
+                    element = refreshed or element
+                    if not element or not element.image_uri:
+                        element = self._ensure_snapshot_element(
+                            session_id,
+                            source_pdf_path,
+                            page_no,
+                            idx,
+                            figures_by_page,
+                            label,
+                        )
             if not element or not element.image_uri:
                 return match.group(0)
             consumed.add((page_no, idx))
@@ -955,6 +978,48 @@ class NoteGenerator:
         if index <= 0 or index > len(elements):
             return None
         return elements[index - 1]
+
+    def _ensure_snapshot_element(
+        self,
+        session_id: str,
+        source_pdf_path: str,
+        page_no: int,
+        idx: int,
+        figures_by_page: Dict[int, List[LayoutElement]],
+        label: str,
+    ) -> Optional[LayoutElement]:
+        if fitz is None:
+            return None
+        doc = None
+        try:
+            doc = fitz.open(source_pdf_path)
+            page = doc.load_page(max(page_no - 1, 0))
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            image_bytes = pixmap.tobytes("png")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("自动截图失败: session=%s page=%s error=%s", session_id, page_no, exc)
+            return None
+        finally:
+            try:
+                doc.close()
+            except Exception:
+                pass
+        filename = f"inline_{new_id('snap')}_p{page_no}.png"
+        image_uri = assets.write_asset(session_id, filename, image_bytes)
+        element = LayoutElement(
+            ref=new_id("autofig"),
+            kind=BlockType.image,
+            image_uri=image_uri,
+            caption=label or f"第{page_no}页截图",
+        )
+        page_elements = figures_by_page.setdefault(page_no, [])
+        while len(page_elements) < idx - 1:
+            page_elements.append(element)
+        if len(page_elements) < idx:
+            page_elements.append(element)
+        else:
+            page_elements[idx - 1] = element
+        return element
 
     def _resolve_figures(
         self,
@@ -988,3 +1053,7 @@ class NoteGenerator:
                         NoteEquation(latex=element.latex, caption=element.caption or "")
                     )
         return equations
+try:  # pragma: no cover - optional dependency
+    import fitz
+except ImportError:  # pragma: no cover - optional dependency
+    fitz = None

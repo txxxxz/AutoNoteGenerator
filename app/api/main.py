@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.orchestrator.pipeline import CourseSessionManager, CourseSessionPipeline
 from app.schemas.api import (
@@ -39,6 +40,7 @@ from app.schemas.common import (
     QAResponse,
 )
 from app.storage import uploads
+from app.storage.assets import ASSET_ROOT
 from app.storage.repository import repository
 from app.storage.settings_store import get_llm_settings, save_llm_settings
 from app.modules.exporter.export_service import ExportService
@@ -49,6 +51,7 @@ from app.configs.settings import settings
 from app.utils.logger import logger
 
 app = FastAPI(title="StudyCompanion API", version="1.0.0")
+app.mount("/assets", StaticFiles(directory=str(ASSET_ROOT)), name="assets")
 manager = CourseSessionManager()
 
 

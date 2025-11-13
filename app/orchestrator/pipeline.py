@@ -274,6 +274,14 @@ class CourseSessionPipeline:
         )
         if progress_callback:
             progress_callback({"phase": "prepare", "message": "构建章节内容…"})
+        session_meta = self.manager.get_session(self.session_id)
+        source_file = None
+        if session_meta and session_meta.get("file_id"):
+            try:
+                source_file = uploads.get_path(session_meta["file_id"])
+            except FileNotFoundError:
+                source_file = None
+
         note_doc = self.note_generator.generate(
             self.session_id,
             outline,
@@ -282,6 +290,7 @@ class CourseSessionPipeline:
             difficulty,
             language,
             progress_callback=progress_callback,
+            source_pdf_path=str(source_file) if source_file else None,
         )
         if progress_callback:
             progress_callback({"phase": "save", "message": "整理并保存生成结果…"})
