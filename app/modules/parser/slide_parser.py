@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import List
 import re
 
-import pdfplumber
 from pydantic import ValidationError
 
 from app.schemas.common import BlockType, ParseResponse, SlideBlock, SlidePage
@@ -19,7 +18,7 @@ try:  # pragma: no cover - optional dependency guard
     import fitz  # PyMuPDF
 except ImportError:  # pragma: no cover - optional dependency guard
     fitz = None
-    logger.warning("PyMuPDF unavailable: PDF image extraction disabled")
+    logger.warning("PyMuPDF unavailable: PDF parsing/image extraction disabled")
 
 try:
     from pptx import Presentation
@@ -59,67 +58,78 @@ class SlideParser:
             raise
 
     def _parse_pdf(self, file_path: Path, session_id: str) -> List[SlidePage]:
-        results: List[SlidePage] = []
-        fitz_doc = None
+        if fitz is None:
+            raise RuntimeError("PyMuPDF 未安装，无法解析 PDF")
         try:
-            if fitz is not None:
-                try:
-                    fitz_doc = fitz.open(str(file_path))
-                except Exception as exc:  # pragma: no cover - dependency guard
-                    logger.warning("Failed to open PDF with PyMuPDF, images disabled: %s", exc)
-                    fitz_doc = None
-            with pdfplumber.open(str(file_path)) as pdf:
-                if not pdf.pages:
-                    raise ValueError("PDF 未包含任何页面，无法解析")
-                for page in pdf.pages:
-                    blocks: List[SlideBlock] = []
-                    words = page.extract_words(
-                        keep_blank_chars=False, use_text_flow=True, extra_attrs=["size"]
-                    )
-                    order = 0
-                    text_buffer: List[str] = []
-                    bbox_buffer: List[List[float]] = []
-                    for word in words:
-                        text_buffer.append(word["text"])
-                        bbox_buffer.append(
-                            [
-                                float(word["x0"]),
-                                float(word["top"]),
-                                float(word["x1"] - word["x0"]),
-                                float(word["bottom"] - word["top"]),
-                            ]
-                        )
-                    if text_buffer:
-                        merged = " ".join(text_buffer).strip()
-                        if merged:
-                            block_type = (
-                                BlockType.formula if _likely_formula(merged) else BlockType.text
-                            )
-                            blocks.append(
-                                SlideBlock(
-                                    id=new_id("b"),
-                                    type=block_type,
-                                    order=order,
-                                    raw_text=merged,
-                                    bbox=[float(page.width), float(page.height), 0.0, 0.0],
-                                )
-                            )
-                            order += 1
-                    # 附加图片资产，保持与页码一致的顺序
-                    image_blocks = self._extract_pdf_images(
-                        fitz_doc, page.page_number, session_id, page.width, page.height
-                    )
-                    if image_blocks:
-                        for image_block in image_blocks:
-                            image_block.order = order
-                            blocks.append(image_block)
-                            order += 1
+            fitz_doc = fitz.open(str(file_path))
+        except Exception as exc:  # pragma: no cover - dependency guard
+            logger.error("无法打开 PDF 文件: %s", exc)
+            raise
 
-                    # 无论是否有图片，都要添加这一页
-                    results.append(SlidePage(page_no=page.page_number, blocks=blocks))
+        results: List[SlidePage] = []
+        try:
+            if fitz_doc.page_count == 0:
+                raise ValueError("PDF 未包含任何页面，无法解析")
+            for page_index in range(fitz_doc.page_count):
+                page = fitz_doc.load_page(page_index)
+                blocks: List[SlideBlock] = []
+                order = 0
+                text_blocks = page.get_text("blocks") or []
+                for block in text_blocks:
+                    if len(block) < 6:
+                        continue
+                    x0, y0, x1, y1, text, block_no, block_type = block[:7]
+                    if block_type != 0:  # 仅处理文字块
+                        continue
+                    snippet = (text or "").strip()
+                    if not snippet:
+                        continue
+                    block_kind = BlockType.formula if _likely_formula(snippet) else BlockType.text
+                    blocks.append(
+                        SlideBlock(
+                            id=new_id("b"),
+                            type=block_kind,
+                            order=order,
+                            raw_text=snippet,
+                            bbox=[
+                                float(x0),
+                                float(y0),
+                                float(max(x1 - x0, 0.0)),
+                                float(max(y1 - y0, 0.0)),
+                            ],
+                        )
+                    )
+                    order += 1
+                if not blocks:
+                    fallback_text = (page.get_text("text") or "").strip()
+                    if fallback_text:
+                        block_type = BlockType.formula if _likely_formula(fallback_text) else BlockType.text
+                        blocks.append(
+                            SlideBlock(
+                                id=new_id("b"),
+                                type=block_type,
+                                order=order,
+                                raw_text=fallback_text,
+                                bbox=[float(page.rect.width), float(page.rect.height), 0.0, 0.0],
+                            )
+                        )
+                        order += 1
+
+                image_blocks = self._extract_pdf_images(
+                    fitz_doc,
+                    page_index + 1,
+                    session_id,
+                    float(page.rect.width),
+                    float(page.rect.height),
+                )
+                for image_block in image_blocks:
+                    image_block.order = order
+                    blocks.append(image_block)
+                    order += 1
+
+                results.append(SlidePage(page_no=page_index + 1, blocks=blocks))
         finally:
-            if fitz_doc is not None:
-                fitz_doc.close()
+            fitz_doc.close()
         return results
 
     def _extract_pdf_images(

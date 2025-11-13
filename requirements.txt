@@ -10,7 +10,6 @@ langchain-openai>=0.1.7
 openai>=1.30.0
 markdown-pdf
 python-dotenv
-pdfplumber
 python-pptx
 PyMuPDF
 PyYAML

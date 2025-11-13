@@ -42,7 +42,7 @@ PAGE_HEADING_PATTERN = re.compile(
 )
 
 FIGURE_PLACEHOLDER_PATTERN = re.compile(
-    r"\[FIG_PAGE_(?P<page>\d+)_IDX_(?P<idx>\d+)\s*[:：]\s*(?P<label>[^\]]+)\]",
+    r"`?\[\s*FIG[_\-\s]?PAGE[_\-\s]?(?P<page>\d+)\s*[_\-\s]?IDX[_\-\s]?(?P<idx>\d+)\s*(?:[:：\-]|=>)?\s*(?P<label>[^\]\n`]+)\]\s*`?",
     re.IGNORECASE,
 )
 
