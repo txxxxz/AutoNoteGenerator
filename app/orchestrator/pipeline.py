@@ -334,11 +334,12 @@ class CourseSessionPipeline:
     def generate_mindmap(self) -> tuple[str, dict]:
         outline = self._load_outline()
         graph = self.mindmap_generator.generate(outline)
+        graph_payload = graph.model_dump(by_alias=True)
         graph_id = f"mindmap_{self.session_id}"
         repository.save_artifact(
-            self.session_id, "mindmap", graph.model_dump(), artifact_id=graph_id
+            self.session_id, "mindmap", graph_payload, artifact_id=graph_id
         )
-        return graph_id, graph.model_dump()
+        return graph_id, graph_payload
 
     def _load_parse(self) -> ParseResponse:
         payload = repository.load_artifact(f"parse_{self.session_id}")

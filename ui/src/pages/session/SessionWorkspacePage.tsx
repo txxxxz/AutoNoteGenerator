@@ -33,6 +33,8 @@ import QaFab from '../../components/QaFab';
 import StylePanel from '../../components/StylePanel';
 import TemplateSelector from '../../components/TemplateSelector';
 import TocTree, { TocItem } from '../../components/TocTree';
+import MarkdownRenderer from '../../components/MarkdownRenderer';
+import MindmapDiagram from '../../components/MindmapDiagram';
 import { useScrollSync } from '../../hooks/useScrollSync';
 import { useSectionRegen } from '../../hooks/useSectionRegen';
 import { useSessionState } from '../../hooks/useSessionState';
@@ -567,20 +569,30 @@ const SessionWorkspacePage = () => {
               {cards.cards.map((card) => (
                 <article key={card.concept} className="card-item">
                   <h3>{card.concept}</h3>
-                  <p>{card.definition}</p>
-                  <div>
-                    <strong>考点：</strong>
-                    <ul>
-                      {card.exam_points.map((point) => (
-                        <li key={point}>{point}</li>
-                      ))}
-                    </ul>
-                  </div>
+                  <MarkdownRenderer content={card.definition} className="card-item__definition" />
+                  {!!card.exam_points?.length && (
+                    <div>
+                      <strong>考点：</strong>
+                      <ul>
+                        {card.exam_points.map((point, index) => (
+                          <li key={`${card.concept}-point-${index}`}>
+                            <MarkdownRenderer content={point} className="card-item__point" />
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                   {card.example_q && (
                     <details>
                       <summary>例题</summary>
-                      <p>Q: {card.example_q.stem}</p>
-                      <p>A: {card.example_q.answer}</p>
+                      <div className="card-item__qa">
+                        <strong>Q：</strong>
+                        <MarkdownRenderer content={card.example_q.stem} className="card-item__example" />
+                      </div>
+                      <div className="card-item__qa">
+                        <strong>A：</strong>
+                        <MarkdownRenderer content={card.example_q.answer} className="card-item__example" />
+                      </div>
                     </details>
                   )}
                 </article>
@@ -599,20 +611,43 @@ const SessionWorkspacePage = () => {
               </header>
               <ol>
                 {mock.items.map((item) => (
-                  <li key={item.id}>
-                    <h3>{item.stem}</h3>
-                    {item.options && (
-                      <ul>
-                        {item.options.map((opt) => (
-                          <li key={opt}>{opt}</li>
+                  <li key={item.id} className="mock-question">
+                    <div className="mock-question__stem">
+                      <MarkdownRenderer content={item.stem} />
+                    </div>
+                    {item.options && item.options.length > 0 && (
+                      <ul className="mock-question__options">
+                        {item.options.map((opt, index) => (
+                          <li key={`${item.id}-opt-${index}`}>
+                            <MarkdownRenderer content={opt} />
+                          </li>
                         ))}
                       </ul>
                     )}
                     <details>
                       <summary>查看答案/解析</summary>
-                      <p>答案：{item.answer}</p>
-                      {item.explain && <p>解析：{item.explain}</p>}
-                      {item.key_points && <p>得分点：{item.key_points.join('、')}</p>}
+                      <div className="mock-question__answer">
+                        <strong>答案：</strong>
+                        <MarkdownRenderer content={item.answer} />
+                      </div>
+                      {item.explain && (
+                        <div className="mock-question__explain">
+                          <strong>解析：</strong>
+                          <MarkdownRenderer content={item.explain} />
+                        </div>
+                      )}
+                      {item.key_points && item.key_points.length > 0 && (
+                        <div className="mock-question__points">
+                          <strong>得分点：</strong>
+                          <ul>
+                            {item.key_points.map((point, index) => (
+                              <li key={`${item.id}-kp-${index}`}>
+                                <MarkdownRenderer content={point} />
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                     </details>
                   </li>
                 ))}
@@ -622,15 +657,7 @@ const SessionWorkspacePage = () => {
             <p>尚未生成模拟试题。</p>
           ) : null}
           {view === 'mindmap' && mindmap ? (
-            <div className="mindmap">
-              <ul>
-                {mindmap.nodes.map((node) => (
-                  <li key={node.id} style={{ marginLeft: `${node.level * 24}px` }}>
-                    {node.label}
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <MindmapDiagram graph={mindmap} />
           ) : view === 'mindmap' ? (
             <p>尚未生成思维导图。</p>
           ) : null}

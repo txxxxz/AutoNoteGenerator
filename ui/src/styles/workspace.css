@@ -145,6 +145,29 @@
   padding-left: 1.2rem;
 }
 
+.card-item__definition,
+.card-item__point,
+.card-item__example {
+  padding: 0;
+}
+
+.card-item__definition p:last-child,
+.card-item__point p:last-child,
+.card-item__example p:last-child {
+  margin-bottom: 0;
+}
+
+.card-item details {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-2);
+}
+
+.card-item__qa {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
 .mock-paper {
   background: var(--color-surface);
   padding: var(--space-4);
@@ -162,10 +185,98 @@
   padding-left: 1.2rem;
 }
 
+.mock-question {
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.mock-question:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: 0;
+}
+
+.mock-question__stem {
+  font-weight: 600;
+}
+
+.mock-question__stem p:last-child {
+  margin-bottom: 0;
+}
+
+.mock-question__options {
+  margin-top: var(--space-2);
+}
+
+.mock-question__answer,
+.mock-question__explain,
+.mock-question__points {
+  margin-top: var(--space-2);
+}
+
+.mock-question__points ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
 .mindmap {
   background: var(--color-surface);
   padding: var(--space-4);
   border-radius: var(--radius-md);
+}
+
+.mindmap-diagram {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  box-shadow: var(--shadow-sm);
+}
+
+.mindmap-diagram__toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.mindmap-diagram__toolbar button {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-3);
+  background: var(--color-surface-alt);
+  cursor: pointer;
+}
+
+.mindmap-diagram__canvas {
+  overflow: auto;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  background: var(--color-surface-alt);
+}
+
+.mindmap-diagram__svg svg {
+  width: 100%;
+  height: 100%;
+}
+
+.mindmap-diagram__code {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-2);
+}
+
+.mindmap-diagram__code pre {
+  max-height: 240px;
+  overflow: auto;
+  background: #111;
+  color: #e1e1e1;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  margin-top: var(--space-2);
+}
+
+.mindmap-diagram__error {
+  color: var(--color-danger, #d23f3f);
 }
 
 @media (max-width: 1200px) {

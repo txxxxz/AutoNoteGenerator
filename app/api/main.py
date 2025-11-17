@@ -338,7 +338,26 @@ def _load_mindmap(graph_id: str) -> MindmapGraph:
     payload = repository.load_artifact(graph_id)
     if not payload:
         raise HTTPException(status_code=404, detail="mindmap not found")
-    return MindmapGraph(**payload)
+    normalized = _normalize_mindmap_payload(payload)
+    return MindmapGraph(**normalized)
+
+
+def _normalize_mindmap_payload(payload: dict) -> dict:
+    edges = payload.get("edges")
+    if not isinstance(edges, list):
+        return payload
+    updated_edges = []
+    mutated = False
+    for edge in edges:
+        if isinstance(edge, dict) and "from" not in edge and "from_" in edge:
+            updated_edges.append({**edge, "from": edge["from_"]})
+            mutated = True
+        else:
+            updated_edges.append(edge)
+    if not mutated:
+        return payload
+    cloned = {**payload, "edges": updated_edges}
+    return cloned
 
 
 def _latest_note(session_id: str) -> NoteDoc | None:
