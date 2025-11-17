@@ -1,7 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Dict, Optional
+
+
+@dataclass(frozen=True)
+class StyleProfile:
+    """风格配置文件，包含风格指令文本、结构化指令和示例片段"""
+    text: str  # 风格指令的完整文本
+    directives: Dict[str, object]  # 结构化的指令字典
+    example_snippet: str  # 示例 Markdown 片段（可选）
 
 
 @dataclass(frozen=True)
@@ -41,7 +49,7 @@ DETAIL_POLICIES = {
     "medium": DetailPolicy(
         label="中等",
         length_ratio=(0.9, 1.1),
-        summary="每节结尾提供 1-2 句总结，回答“学到了什么”。",
+        summary="每二级标题结尾提供 1-2 句总结，回答“学到了什么”。",
         examples="至少写出 1 个例子或场景，突出关键步骤或直观感受。",
         structure="段落与 bullet 均衡，段首使用“接下来/因此”等提示保持衔接。",
         figure_caption="图表或公式用 1-2 句说明目的与使用方式。",
@@ -50,11 +58,11 @@ DETAIL_POLICIES = {
     "detailed": DetailPolicy(
         label="详细",
         length_ratio=(1.4, 1.7),
-        summary="总结需 2-4 句，可列要点清单，包含洞见与下一步提示。",
+        summary="每三级标题需总结 2-4 句，可列要点清单，包含洞见与下一步提示。",    
         examples="提供 2-3 个深入示例、推导节点或反例，说明条件与结果。",
         structure="以段落为主并穿插列表，明确因果、条件与跨页内容的延续关系。",
         figure_caption="图表或公式需要 2-4 句阐述背景、变量含义与适用边界。",
-        coverage="涵盖结论、定义、推理、约束与常见误区或实验洞察。",
+        coverage="涵盖结论、定义、推理、约束与常见误区或实验洞察。适当使用对比表格（如‘模型A vs 模型B’）强化概念差异。"
     ),
 }
 
@@ -80,7 +88,7 @@ TONE_POLICIES = {
         formula_guidance="引入 1-2 个必要公式，并在同一句说明用途或适用条件。",
         variable_policy="变量出现时立即说明含义、单位或范围。",
         constraint_policy="每个主要概念至少写 1 条适用条件或限制。",
-        transition="使用“因此”“接下来”“基于上述”等逻辑连接词维持递进。",
+        transition="多用“举个例子”“我们再看一下”“可以想象成”等自然过渡语。",
     ),
     "academic": TonePolicy(
         label="insightful（半学术）",
@@ -96,37 +104,35 @@ TONE_POLICIES = {
 }
 
 
-@dataclass(frozen=True)
-class StyleProfile:
-    text: str
-    directives: Dict[str, Any]
-    example_snippet: str
-
-
 GLOBAL_PERSONA = (
-    "你是大学课程的智能讲解助手，负责把课件内容转化成自然、口头化的教学讲解，帮助学生理解知识而非逐页复述。"
+    "你是一位课程讲解助教，负责把课件转写成自然的课堂讲解。要求："
+    "- 语言像老师现场讲课，适当穿插比喻和提问。"
+    "- 输出为 Markdown 格式，使用多级标题、引用块、表格、提示块、公式块、代码块等丰富结构。"
 )
 FLOW_INSTRUCTION = (
-    "每个自然段遵循“为什么值得关注 → 是什么/概念 → 怎么做或如何应用”的顺序，不使用模板式小标题；用自然段或必要的 bullet 描述，并在段首或段尾写 1-2 句承上启下。"
+    "遵循“为什么值得关注 → 是什么/概念 → 怎么做或如何应用”的顺序；使用自然段引入，必要时使用 bullet 和小标题描述，并在段首或段尾写 1-2 句承上启下。"
 )
 FORMULA_RULE = (
-    "遇到公式请保留原符号，逐个解释符号含义，并说明该公式试图解决的问题或它的适用条件；"
-    "所有公式必须使用 `$$公式$$` 包裹，例如 `$$x-1$$` 而不是 `(x-1)`。"
+    "遇到公式请保留原符号，逐个解释符号含义，并说明该公式试图解决的问题或它的适用条件。"
 )
 FIGURE_PLACEHOLDER_RULE = (
-    "描述图表或截图的核心关系，插入占位符 [FIG_PAGE_<页号>_IDX_<序号>: 描述] 指回原始资源，并紧接着用 1-2 句自然语言解释图像；算法/流程/网络结构图需额外交代关键步骤。"
+    "描述图表或截图的核心关系，并插入占位符 [FIG_PAGE_<页号>_IDX_<序号>: 描述] 指回原始资源。"
 )
 BULLET_RULE = (
-    "可使用 bullet 强调步骤或要点，但整段仍需连贯讲述，避免把篇章拆成模板化小节。"
+    "可使用 bullet 和小标题强调步骤或要点，但引入仍需连贯讲述，不要直接罗列无衔接的片段。"
 )
 MISSING_RULE = "上下文缺失或证据不足时，直接写“此处待补充”，绝不杜撰数据、推导或引用。"
 EVIDENCE_RULE = "示例、比喻与数字必须来自现有上下文；若资料只有片段，请标注缺口而非臆造。"
 
 
-def build_style_profile(detail_level: str, difficulty: str, language: str = "zh") -> StyleProfile:
+def build_style_instructions(detail_level: str, difficulty: str, language: str = "zh") -> str:
     detail = DETAIL_POLICIES[detail_level]
     tone = TONE_POLICIES[difficulty]
-    language_instruction = _build_language_instruction(language)
+    language_instruction = (
+        "使用简体中文书写所有段落、 bullet 与占位符说明；如上下文为英文，也需翻译成中文保持统一。"
+        if language == "zh"
+        else "Write every paragraph, list item, and placeholder description in fluent English; translate any Chinese context instead of copying it verbatim."
+    )
     sections = [
         f"【角色设定】{GLOBAL_PERSONA}",
         f"【讲解顺序】{FLOW_INSTRUCTION}",
@@ -144,118 +150,129 @@ def build_style_profile(detail_level: str, difficulty: str, language: str = "zh"
         f"【示例与依据】{EVIDENCE_RULE}",
         f"【语言】{language_instruction}",
     ]
-    text = "\n".join(f"- {line}" for line in sections if line)
-    directives = _compose_directives(detail_level, difficulty, language)
-    example_snippet = _build_example_snippet(detail, tone, directives, language)
-    return StyleProfile(text=text, directives=directives, example_snippet=example_snippet)
+    return "\n".join(f"- {line}" for line in sections if line)
 
 
-def build_style_instructions(detail_level: str, difficulty: str, language: str = "zh") -> str:
+def build_style_profile(detail_level: str, difficulty: str, language: str = "zh") -> StyleProfile:
     """
-    Backward compatible helper that exposes the legacy string instructions.
-    Code that only understands textual prompts can continue using this API,
-    while the new StyleProfile carries richer directives.
+    构建 StyleProfile 对象，包含风格指令文本和结构化指令
+    
+    Args:
+        detail_level: 详细程度 ("brief", "medium", "detailed")
+        difficulty: 难度/语气 ("simple", "explanatory", "academic")
+        language: 语言 ("zh", "en")
+    
+    Returns:
+        StyleProfile 对象，包含完整的风格配置
     """
-    return build_style_profile(detail_level, difficulty, language).text
-
-
-def _build_language_instruction(language: str) -> str:
-    if language == "zh":
-        return (
-            "使用简体中文书写所有段落、 bullet 与占位符说明；如上下文为英文，也需翻译成中文保持统一。"
-        )
-    return (
-        "Write every paragraph, list item, and placeholder description in fluent English; "
-        "translate any Chinese context instead of copying it verbatim."
-    )
-
-
-def _compose_directives(detail_level: str, tone_level: str, language: str) -> Dict[str, Any]:
-    summary_mode = (
-        "none" if detail_level == "brief" else "takeaway" if detail_level == "medium" else "insight"
-    )
-    formula_mode = (
-        "light" if tone_level == "simple" else "balanced" if tone_level == "explanatory" else "extended"
-    )
-    return {
-        "detail_level": detail_level,
-        "tone": tone_level,
+    # 获取基础风格指令文本
+    style_text = build_style_instructions(detail_level, difficulty, language)
+    
+    # 获取策略对象
+    detail = DETAIL_POLICIES.get(detail_level, DETAIL_POLICIES["medium"])
+    tone = TONE_POLICIES.get(difficulty, TONE_POLICIES["explanatory"])
+    
+    # 构建结构化指令字典
+    directives: Dict[str, object] = {
         "language": language,
-        "summary_mode": summary_mode,
-        "use_table": detail_level != "brief",
-        "analogy_required": tone_level == "simple",
-        "formula_mode": formula_mode,
-        "formula_caption_scope": "contextual" if tone_level != "academic" else "rigorous",
         "page_header_template": "### 第{page}页" if language == "zh" else "### Page {page}",
-        "blockquote_required": detail_level != "brief",
-        "require_summary": summary_mode != "none",
-        "validator": {
-            "ensure_page_headers": True,
-            "ensure_summary": summary_mode != "none",
-            "ensure_blockquote": detail_level != "brief",
-        },
     }
-
-
-def _build_example_snippet(
-    detail: DetailPolicy, tone: TonePolicy, directives: Dict[str, Any], language: str
-) -> str:
-    header_template = directives.get("page_header_template", "### 第{page}页")
-    sample_header = header_template.format(page=3)
-    detail_label_en = {"brief": "concise", "medium": "balanced", "detailed": "in-depth"}
-    tone_label_en = {
-        "simple": "approachable",
-        "explanatory": "classroom-style",
-        "academic": "academic",
-    }
-    detail_adj = detail_label_en.get(directives.get("detail_level"), detail.label)
-    tone_adj = tone_label_en.get(directives.get("tone"), tone.label)
-    if language == "zh":
-        intro = "## 示例：多头注意力如何聚焦 (p.3-4)"
-        bullets = [
-            "- 先一句“人话”解释它为什么重要，再拆成概念与应用。",
-            "- 把 PPT bullet 改写成完整语句，并交代承上启下。",
-        ]
-        style_hint = f"*风格提示：保持「{detail.label}」篇幅和「{tone.label}」的叙述节奏。*"
-        analogy_line = "> 💡 打个比方：注意力像手电筒，会把光束集中在关键片段。"
-        table_header = "| 对比项 | 直觉 | 提示 |\n| --- | --- | --- |\n| Query | 要问的问题 | 代表当前词 |"
-        table_row = "| Key/Value | 候选信息 | 输出时作为权重参考 |"
-        formula_line = "$$a = \\frac{qk^T}{\\sqrt{d_k}}$$ —— 解释 q/k/d_k 分别表示当前词、检索词与维度。"
-        summary_takeaway = "> **一句话总结：** 聚焦 = 权重重分配。"
-        insight_line = "> **章节洞察：** 通过表格与公式说明了注意力兼顾直觉与推理。"
-        pending = "（请在正式输出中替换示例内容）"
+    
+    # 根据详细程度设置总结模式
+    if detail_level == "brief":
+        directives["summary_mode"] = "takeaway"  # 只要一句话总结
+    elif detail_level == "detailed":
+        directives["summary_mode"] = "insight"  # 要深入洞察
     else:
-        intro = "## Example: How multi-head attention focuses (p.3-4)"
-        bullets = [
-            "- Lead with the practical reason students should care before definitions.",
-            "- Rewrite deck bullets into flowing sentences with transitions.",
-        ]
-        style_hint = f"*Style cue: keep the notes {detail_adj} while sounding {tone_adj}.*"
-        analogy_line = "> 💡 Analogy: attention is a spotlight that sweeps over the canvas."
-        table_header = "| Aspect | Intuition | Tip |\n| --- | --- | --- |\n| Query | Question we ask | Current token |"
-        table_row = "| Key/Value | Candidate memory | Weight reference |"
-        formula_line = "$$a = \\frac{qk^T}{\\sqrt{d_k}}$$ — explain what each symbol captures."
-        summary_takeaway = "> **One-sentence takeaway:** Focus comes from re-weighting evidence."
-        insight_line = "> **Section insight:** Tables + formulas keep both intuition and rigor aligned."
-        pending = "(Replace placeholder text in real output.)"
+        directives["summary_mode"] = "none"  # 中等程度不强制总结
+    
+    # 根据难度设置特殊要求
+    if difficulty == "simple":
+        directives["analogy_required"] = True  # 科普风格必须有比喻
+        directives["formula_mode"] = "light"  # 公式轻量化
+        directives["blockquote_required"] = True  # 需要引用块强调重点
+    elif difficulty == "academic":
+        directives["formula_mode"] = "extended"  # 公式详细推导
+        directives["use_table"] = True  # 使用表格对比
+    else:
+        directives["formula_mode"] = "standard"  # 标准公式处理
+    
+    # 根据详细程度添加表格要求
+    if detail_level == "detailed":
+        directives["use_table"] = True  # 详细模式需要对比表格
+    
+    # 构建示例片段（根据风格提供参考格式）
+    example_snippet = _build_example_snippet(detail_level, difficulty, language)
+    
+    return StyleProfile(
+        text=style_text,
+        directives=directives,
+        example_snippet=example_snippet
+    )
 
-    snippet_parts = [intro, style_hint, sample_header]
-    snippet_parts.extend(bullets)
 
-    if directives.get("analogy_required"):
-        snippet_parts.append(analogy_line)
+def _build_example_snippet(detail_level: str, difficulty: str, language: str) -> str:
+    """构建示例 Markdown 片段，展示期望的格式"""
+    if language == "zh":
+        if difficulty == "simple" and detail_level == "brief":
+            return """
+## 机器学习基础 (第1-2页)
 
-    if directives.get("use_table"):
-        snippet_parts.extend([table_header, table_row])
+### 第1页：什么是机器学习
 
-    if directives.get("formula_mode") == "extended":
-        snippet_parts.append(formula_line)
+机器学习就是让计算机从数据中自动学习规律的技术。
 
-    summary_mode = directives.get("summary_mode", "none")
-    if summary_mode == "takeaway":
-        snippet_parts.append(summary_takeaway)
-    elif summary_mode == "insight":
-        snippet_parts.append(insight_line)
+> 💡 打个比方：就像小孩通过反复观察学会认猫，机器也能通过看大量照片学会识别物体。
 
-    snippet_parts.append(pending)
-    return "\n".join(snippet_parts).strip()
+> **一句话总结：** 机器学习让程序自动从数据中提取知识，而不是人工编写每条规则。
+"""
+        elif difficulty == "academic" and detail_level == "detailed":
+            return """
+## 线性回归模型 (第3-5页)
+
+### 第3页：最小二乘估计
+
+最小二乘法（Ordinary Least Squares, OLS）通过最小化残差平方和来估计模型参数。
+
+给定训练集 $\\{(x_i, y_i)\\}_{i=1}^n$，目标是找到参数 $\\beta$ 使得：
+
+$$\\hat{\\beta} = \\arg\\min_{\\beta} \\sum_{i=1}^n (y_i - x_i^T\\beta)^2$$
+
+其中：
+- $x_i \\in \\mathbb{R}^p$ 为特征向量
+- $y_i \\in \\mathbb{R}$ 为响应变量
+- $\\beta \\in \\mathbb{R}^p$ 为待估参数
+
+| 优点 | 缺点 | 适用场景 |
+|------|------|----------|
+| 计算简单，有闭式解 | 对异常值敏感 | 线性关系明确时 |
+| 统计性质良好 | 需要正态假设 | 样本量充足时 |
+
+> **章节洞察：** OLS 在理论上优雅但实践中需注意共线性和异常值问题，必要时考虑正则化方法。
+"""
+    else:  # English
+        if difficulty == "simple":
+            return """
+## Machine Learning Basics (Pages 1-2)
+
+### Page 1: What is Machine Learning
+
+Machine learning is a technique that allows computers to automatically learn patterns from data.
+
+> 💡 Analogy: Just like a child learns to recognize cats by seeing many examples, machines can learn to identify objects by processing lots of images.
+
+> **One-sentence takeaway:** ML enables programs to extract knowledge from data automatically, without manually coding every rule.
+"""
+    
+    # 默认返回标准格式示例
+    return """
+## 章节标题 (第X-Y页)
+
+### 第X页：页面标题
+
+[每页 4-6 句完整讲解，包含概念、解释、案例]
+
+### 第Y页：页面标题
+
+[继续逐页讲解...]
+"""
