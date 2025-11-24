@@ -3,17 +3,18 @@ import classNames from 'classnames';
 
 import '../styles/toc-tree.css';
 
-type TocItem = {
+export type TocItem = {
   id: string;
   title: string;
   level: number;
+  targetId: string;
 };
 
 type TocTreeProps = {
   items: TocItem[];
   activeId?: string | null;
   searchTerm?: string;
-  onSelect: (id: string) => void;
+  onSelect: (item: TocItem) => void;
 };
 
 const TocTree = ({ items, activeId, searchTerm = '', onSelect }: TocTreeProps) => {
@@ -28,9 +29,9 @@ const TocTree = ({ items, activeId, searchTerm = '', onSelect }: TocTreeProps) =
         {filtered.map((item) => (
           <button
             key={item.id}
-            className={classNames('toc-item', `level-${item.level}`, { active: activeId === item.id })}
+            className={classNames('toc-item', `level-${item.level}`, { active: activeId === item.targetId })}
             role="treeitem"
-            onClick={() => onSelect(item.id)}
+            onClick={() => onSelect(item)}
           >
             {item.title}
           </button>

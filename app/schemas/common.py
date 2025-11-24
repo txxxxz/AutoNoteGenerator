@@ -68,6 +68,9 @@ class OutlineNode(BaseModel):
     anchors: List[AnchorRef] = Field(default_factory=list)
     children: List["OutlineNode"] = Field(default_factory=list)
     level: int = 0
+    pages: List[int] = Field(default_factory=list)
+    page_start: Optional[int] = None
+    page_end: Optional[int] = None
 
     model_config = {
         "json_encoders": {BlockType: lambda v: v.value},
@@ -80,6 +83,7 @@ OutlineNode.model_rebuild()
 
 class OutlineTree(BaseModel):
     root: OutlineNode
+    markdown: Optional[str] = None
 
 
 class NoteFigure(BaseModel):
@@ -99,6 +103,16 @@ class NoteSection(BaseModel):
     figures: List[NoteFigure] = Field(default_factory=list)
     equations: List[NoteEquation] = Field(default_factory=list)
     refs: List[str] = Field(default_factory=list)
+    level: int = 1
+    children: List["NoteSection"] = Field(default_factory=list)
+
+    model_config = {
+        "json_encoders": {BlockType: lambda v: v.value},
+        "arbitrary_types_allowed": True,
+    }
+
+
+NoteSection.model_rebuild()
 
 
 class NoteDoc(BaseModel):

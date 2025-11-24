@@ -5,7 +5,8 @@ import json
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.orchestrator.pipeline import CourseSessionManager, CourseSessionPipeline
 from app.schemas.api import (
@@ -39,6 +40,7 @@ from app.schemas.common import (
     QAResponse,
 )
 from app.storage import uploads
+from app.storage.assets import ASSET_ROOT
 from app.storage.repository import repository
 from app.storage.settings_store import get_llm_settings, save_llm_settings
 from app.modules.exporter.export_service import ExportService
@@ -49,6 +51,7 @@ from app.configs.settings import settings
 from app.utils.logger import logger
 
 app = FastAPI(title="StudyCompanion API", version="1.0.0")
+app.mount("/assets", StaticFiles(directory=str(ASSET_ROOT)), name="assets")
 manager = CourseSessionManager()
 
 
@@ -152,6 +155,14 @@ def build_outline(request: OutlineRequest):
         raise HTTPException(status_code=500, detail=f"大纲生成失败: {exc}") from exc
 
 
+@app.get("/api/v1/outline/{outline_id}", response_model=OutlineTree)
+def get_outline_tree(outline_id: str):
+    payload = repository.load_artifact(outline_id)
+    if not payload:
+        raise HTTPException(status_code=404, detail=f"outline {outline_id} not found")
+    return OutlineTree(**payload)
+
+
 @app.post("/api/v1/notes/generate", response_model=NoteTaskResponse)
 def generate_notes(request: NotesRequest):
     style = request.style
@@ -249,22 +260,47 @@ def generate_mindmap(request: MindmapRequest):
     return {"graph_id": graph_id, "graph": graph}
 
 
-@app.post("/api/v1/export", response_model=ExportResponse)
+@app.post("/api/v1/export")
 def export_artifact(request: ExportRequest):
     exporter = ExportService(request.session_id)
+    export_result = None
+    
     if request.type == "notes":
         note_doc = _load_note(request.target_id)
-        return exporter.export_notes(note_doc, request.format)
-    if request.type == "cards":
+        export_result = exporter.export_notes(note_doc, request.format)
+    elif request.type == "cards":
         cards = _load_cards(request.target_id)
-        return exporter.export_cards(cards, request.format)
-    if request.type == "mock":
+        export_result = exporter.export_cards(cards, request.format)
+    elif request.type == "mock":
         paper = _load_mock(request.target_id)
-        return exporter.export_mock(paper, request.format)
-    if request.type == "mindmap":
+        export_result = exporter.export_mock(paper, request.format)
+    elif request.type == "mindmap":
         graph = _load_mindmap(request.target_id)
-        return exporter.export_mindmap(graph, request.format)
-    raise HTTPException(status_code=400, detail="unsupported export type")
+        export_result = exporter.export_mindmap(graph, request.format)
+    else:
+        raise HTTPException(status_code=400, detail="unsupported export type")
+    
+    # 直接返回文件供浏览器下载
+    file_path = Path(export_result.download_url)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="export file not found")
+    
+    # 根据格式设置 MIME 类型
+    media_type_map = {
+        "md": "text/markdown",
+        "pdf": "application/pdf",
+        "png": "image/png",
+    }
+    media_type = media_type_map.get(request.format, "application/octet-stream")
+    
+    return FileResponse(
+        path=str(file_path),
+        media_type=media_type,
+        filename=export_result.filename,
+        headers={
+            "Content-Disposition": f'attachment; filename="{export_result.filename}"'
+        }
+    )
 
 
 @app.post("/api/v1/qa/ask", response_model=QAResponse)
@@ -302,7 +338,26 @@ def _load_mindmap(graph_id: str) -> MindmapGraph:
     payload = repository.load_artifact(graph_id)
     if not payload:
         raise HTTPException(status_code=404, detail="mindmap not found")
-    return MindmapGraph(**payload)
+    normalized = _normalize_mindmap_payload(payload)
+    return MindmapGraph(**normalized)
+
+
+def _normalize_mindmap_payload(payload: dict) -> dict:
+    edges = payload.get("edges")
+    if not isinstance(edges, list):
+        return payload
+    updated_edges = []
+    mutated = False
+    for edge in edges:
+        if isinstance(edge, dict) and "from" not in edge and "from_" in edge:
+            updated_edges.append({**edge, "from": edge["from_"]})
+            mutated = True
+        else:
+            updated_edges.append(edge)
+    if not mutated:
+        return payload
+    cloned = {**payload, "edges": updated_edges}
+    return cloned
 
 
 def _latest_note(session_id: str) -> NoteDoc | None:

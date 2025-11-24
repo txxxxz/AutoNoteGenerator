@@ -1,0 +1,8 @@
+{
+  "llm": {
+    "provider": "openai",
+    "api_key": "sk-zk2100825e80700c4f1676ae873595ba99c6915bb675e479",
+    "llm_model": "gpt-4o",
+    "embedding_model": "text-embedding-3-small"
+  }
+}

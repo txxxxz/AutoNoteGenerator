@@ -8,6 +8,7 @@ import {
   fetchMindmap,
   fetchMock,
   fetchNoteDoc,
+  fetchOutline,
   generateCards,
   generateMindmap,
   generateMock,
@@ -21,6 +22,7 @@ import {
   MockPaper,
   NoteDoc,
   NoteTaskStatus,
+  OutlineNode,
   SessionDetail
 } from '../../api/types';
 import ContentSection from '../../components/ContentBlock/NoteSectionView';
@@ -30,7 +32,9 @@ import QaDrawer from '../../components/QaDrawer';
 import QaFab from '../../components/QaFab';
 import StylePanel from '../../components/StylePanel';
 import TemplateSelector from '../../components/TemplateSelector';
-import TocTree from '../../components/TocTree';
+import TocTree, { TocItem } from '../../components/TocTree';
+import MarkdownRenderer from '../../components/MarkdownRenderer';
+import MindmapDiagram from '../../components/MindmapDiagram';
 import { useScrollSync } from '../../hooks/useScrollSync';
 import { useSectionRegen } from '../../hooks/useSectionRegen';
 import { useSessionState } from '../../hooks/useSessionState';
@@ -75,10 +79,22 @@ const SessionWorkspacePage = () => {
   const setMock = useSessionState((state) => state.setMock);
   const setMindmap = useSessionState((state) => state.setMindmap);
   const setOutlineId = useSessionState((state) => state.setOutlineId);
+  const setOutline = useSessionState((state) => state.setOutline);
   const setGenerationState = useSessionState((state) => state.setGenerationState);
   const initialiseSession = useSessionState((state) => state.initialiseSession);
   const { pendingSection, startRegen, finishRegen } = useSectionRegen();
   const taskSourceRef = useRef<EventSource | null>(null);
+  const outlineTree = session?.outline;
+  const outlineNodeMap = useMemo(() => {
+    if (!outlineTree?.root) return new Map<string, OutlineNode>();
+    const map = new Map<string, OutlineNode>();
+    const visit = (node: OutlineNode) => {
+      map.set(node.section_id, node);
+      node.children?.forEach((child) => visit(child));
+    };
+    visit(outlineTree.root);
+    return map;
+  }, [outlineTree]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -87,8 +103,21 @@ const SessionWorkspacePage = () => {
       try {
         const detail: SessionDetail = await getSessionDetail(sessionId);
         setSummary(sessionId, detail);
-        const latestNoteId = detail.note_doc_ids.at(-1);
-        if (latestNoteId) {
+        
+        // 加载 outline
+        const outlineIds = detail.available_artifacts?.outline;
+        if (outlineIds && outlineIds.length > 0) {
+          const latestOutlineId = outlineIds[outlineIds.length - 1];
+          try {
+            const outlineDoc = await fetchOutline(latestOutlineId);
+            setOutline(sessionId, latestOutlineId, outlineDoc);
+          } catch (error) {
+            console.warn('加载 outline 失败:', error);
+          }
+        }
+        
+        if (detail.note_doc_ids.length > 0) {
+          const latestNoteId = detail.note_doc_ids[detail.note_doc_ids.length - 1];
           const noteDoc = await fetchNoteDoc(latestNoteId);
           const expression = difficultyToExpression[noteDoc.style.difficulty as keyof typeof difficultyToExpression];
           const language = (noteDoc.style.language as 'zh' | 'en') === 'en' ? 'en' : 'zh';
@@ -104,18 +133,18 @@ const SessionWorkspacePage = () => {
           setExpressionLevel(expression);
           setNoteLanguage(language);
         }
-        const latestCards = detail.cards_ids.at(-1);
-        if (latestCards) {
+        if (detail.cards_ids.length > 0) {
+          const latestCards = detail.cards_ids[detail.cards_ids.length - 1];
           const cardsDoc = await fetchCards(latestCards);
           setCards(sessionId, latestCards, cardsDoc);
         }
-        const latestMock = detail.mock_ids.at(-1);
-        if (latestMock) {
+        if (detail.mock_ids.length > 0) {
+          const latestMock = detail.mock_ids[detail.mock_ids.length - 1];
           const mockDoc = await fetchMock(latestMock);
           setMock(sessionId, latestMock, mockDoc);
         }
-        const latestMindmap = detail.mindmap_ids.at(-1);
-        if (latestMindmap) {
+        if (detail.mindmap_ids.length > 0) {
+          const latestMindmap = detail.mindmap_ids[detail.mindmap_ids.length - 1];
           const mindmap = await fetchMindmap(latestMindmap);
           setMindmap(sessionId, latestMindmap, mindmap);
         }
@@ -142,16 +171,54 @@ const SessionWorkspacePage = () => {
   const mock: MockPaper | undefined = session?.mock;
   const mindmap: MindmapGraph | undefined = session?.mindmap;
 
-  const tocItems = useMemo(() => {
+  const tocItems = useMemo<TocItem[]>(() => {
+    if (outlineTree?.root?.children?.length) {
+      const items: TocItem[] = [];
+      const visit = (node: OutlineNode, numbering: string) => {
+        const level = Math.min(Math.max(node.level || 1, 1), 5);
+        const displayNumber = numbering.endsWith('.') ? numbering : `${numbering}.`;
+        const title = `${displayNumber} ${node.title}`;
+        items.push({
+          id: node.section_id,
+          title,
+          level,
+          targetId: node.section_id
+        });
+        if (node.children && node.children.length > 0) {
+          node.children.forEach((child, index) => {
+            visit(child, `${numbering}.${index + 1}`);
+          });
+        }
+      };
+      outlineTree.root.children.forEach((child, index) => {
+        visit(child, `${index + 1}`);
+      });
+      return items;
+    }
     if (!noteDoc) return [];
     return noteDoc.sections.map((section, index) => ({
       id: section.section_id,
       title: `${index + 1}. ${section.title}`,
-      level: 1
+      level: 1,
+      targetId: section.section_id
     }));
-  }, [noteDoc]);
+  }, [outlineTree, noteDoc]);
 
-  const { activeId, setActiveId } = useScrollSync(tocItems.map((item) => item.id));
+  const scrollTargets = useMemo(() => {
+    if (outlineTree?.root?.children?.length) {
+      const ids: string[] = [];
+      const visit = (node: OutlineNode) => {
+        ids.push(node.section_id);
+        node.children?.forEach((child) => visit(child));
+      };
+      outlineTree.root.children.forEach((child) => visit(child));
+      return ids;
+    }
+    if (!noteDoc) return [];
+    return noteDoc.sections.map((section) => section.section_id);
+  }, [outlineTree, noteDoc]);
+
+  const { activeId, setActiveId } = useScrollSync(scrollTargets);
 
   const handleTaskFailure = (errorMessage?: string | null) => {
     if (!sessionId) return;
@@ -355,8 +422,9 @@ const SessionWorkspacePage = () => {
     if (!targetId) {
       throw new Error('该类型尚未生成');
     }
-    const result = await exportArtifact(sessionId, targetId, type, format);
-    window.open(result.download_url, '_blank');
+    // exportArtifact 现在会直接触发浏览器下载
+    await exportArtifact(sessionId, targetId, type, format);
+    setMessage(`${type} 导出成功`);
   };
 
   const handleAsk = async (scope: 'notes' | 'cards' | 'mock', question: string) => {
@@ -365,15 +433,44 @@ const SessionWorkspacePage = () => {
   };
 
   useEffect(() => {
-    if (!session) return;
-    const outlineIds = session.summary?.available_artifacts?.outline;
-    if (outlineIds && outlineIds.length) {
-      const latest = outlineIds[outlineIds.length - 1];
-      if (latest) {
-        setOutlineId(sessionId, latest);
-      }
+    if (!sessionId || !session?.summary) return;
+    const outlineIds = session.summary.available_artifacts?.outline;
+    console.log('[DEBUG] outline加载检查:', {
+      sessionId,
+      hasSessionSummary: !!session?.summary,
+      availableArtifacts: session.summary.available_artifacts,
+      outlineIds,
+      currentOutlineId: session.outlineId,
+      hasOutline: !!session.outline,
+      outlineRoot: session.outline?.root
+    });
+    if (!outlineIds?.length) return;
+    const latest = outlineIds[outlineIds.length - 1];
+    if (!latest) return;
+    if (session.outlineId !== latest) {
+      setOutlineId(sessionId, latest);
     }
-  }, [session]);
+    if (session.outline && session.outlineId === latest) {
+      return;
+    }
+    let cancelled = false;
+    const loadOutline = async () => {
+      try {
+        console.log('[DEBUG] 开始加载outline:', latest);
+        const outlineTree = await fetchOutline(latest);
+        console.log('[DEBUG] outline加载成功:', outlineTree);
+        if (!cancelled) {
+          setOutline(sessionId, latest, outlineTree);
+        }
+      } catch (error) {
+        console.error('加载大纲失败', error);
+      }
+    };
+    void loadOutline();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, session?.summary, session?.outlineId, session?.outline, setOutlineId, setOutline]);
 
   if (!sessionId) {
     return (
@@ -402,7 +499,11 @@ const SessionWorkspacePage = () => {
         <div>
           <button className="workspace__back" onClick={() => navigate('/')}>返回仪表盘</button>
           <h1>{session?.summary?.title ?? '学习会话'}</h1>
-          <p className="workspace__status">当前状态：{session?.summary?.status ?? '就绪'}</p>
+          <p className="workspace__status">
+            当前状态：{session?.summary?.status ?? '就绪'}
+            {' | '}
+            目录来源：{session?.outline?.root?.children?.length ? `GPT大纲(${tocItems.length}项)` : `PPT标题(${tocItems.length}项)`}
+          </p>
         </div>
         <div className="workspace__actions">
           <button className="primary" onClick={handleGenerate} disabled={session?.generating}>生成</button>
@@ -431,9 +532,10 @@ const SessionWorkspacePage = () => {
             items={tocItems}
             activeId={activeId}
             searchTerm={searchTerm}
-            onSelect={(id) => {
-              setActiveId(id);
-              const elem = document.querySelector(`[data-section-id="${id}"]`);
+            onSelect={(item) => {
+              const targetId = item.targetId;
+              setActiveId(targetId);
+              const elem = document.querySelector(`[data-section-id="${targetId}"]`);
               if (elem) {
                 elem.scrollIntoView({ behavior: 'smooth', block: 'start' });
               }
@@ -456,6 +558,7 @@ const SessionWorkspacePage = () => {
               <ContentSection
                 key={section.section_id}
                 section={section}
+                outlineNode={outlineNodeMap.get(section.section_id)}
                 pending={pendingSection === section.section_id || session?.generating}
                 onRegenerate={handleRegenSection}
               />
@@ -466,20 +569,30 @@ const SessionWorkspacePage = () => {
               {cards.cards.map((card) => (
                 <article key={card.concept} className="card-item">
                   <h3>{card.concept}</h3>
-                  <p>{card.definition}</p>
-                  <div>
-                    <strong>考点：</strong>
-                    <ul>
-                      {card.exam_points.map((point) => (
-                        <li key={point}>{point}</li>
-                      ))}
-                    </ul>
-                  </div>
+                  <MarkdownRenderer content={card.definition} className="card-item__definition" />
+                  {!!card.exam_points?.length && (
+                    <div>
+                      <strong>考点：</strong>
+                      <ul>
+                        {card.exam_points.map((point, index) => (
+                          <li key={`${card.concept}-point-${index}`}>
+                            <MarkdownRenderer content={point} className="card-item__point" />
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                   {card.example_q && (
                     <details>
                       <summary>例题</summary>
-                      <p>Q: {card.example_q.stem}</p>
-                      <p>A: {card.example_q.answer}</p>
+                      <div className="card-item__qa">
+                        <strong>Q：</strong>
+                        <MarkdownRenderer content={card.example_q.stem} className="card-item__example" />
+                      </div>
+                      <div className="card-item__qa">
+                        <strong>A：</strong>
+                        <MarkdownRenderer content={card.example_q.answer} className="card-item__example" />
+                      </div>
                     </details>
                   )}
                 </article>
@@ -498,20 +611,43 @@ const SessionWorkspacePage = () => {
               </header>
               <ol>
                 {mock.items.map((item) => (
-                  <li key={item.id}>
-                    <h3>{item.stem}</h3>
-                    {item.options && (
-                      <ul>
-                        {item.options.map((opt) => (
-                          <li key={opt}>{opt}</li>
+                  <li key={item.id} className="mock-question">
+                    <div className="mock-question__stem">
+                      <MarkdownRenderer content={item.stem} />
+                    </div>
+                    {item.options && item.options.length > 0 && (
+                      <ul className="mock-question__options">
+                        {item.options.map((opt, index) => (
+                          <li key={`${item.id}-opt-${index}`}>
+                            <MarkdownRenderer content={opt} />
+                          </li>
                         ))}
                       </ul>
                     )}
                     <details>
                       <summary>查看答案/解析</summary>
-                      <p>答案：{item.answer}</p>
-                      {item.explain && <p>解析：{item.explain}</p>}
-                      {item.key_points && <p>得分点：{item.key_points.join('、')}</p>}
+                      <div className="mock-question__answer">
+                        <strong>答案：</strong>
+                        <MarkdownRenderer content={item.answer} />
+                      </div>
+                      {item.explain && (
+                        <div className="mock-question__explain">
+                          <strong>解析：</strong>
+                          <MarkdownRenderer content={item.explain} />
+                        </div>
+                      )}
+                      {item.key_points && item.key_points.length > 0 && (
+                        <div className="mock-question__points">
+                          <strong>得分点：</strong>
+                          <ul>
+                            {item.key_points.map((point, index) => (
+                              <li key={`${item.id}-kp-${index}`}>
+                                <MarkdownRenderer content={point} />
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                     </details>
                   </li>
                 ))}
@@ -521,15 +657,7 @@ const SessionWorkspacePage = () => {
             <p>尚未生成模拟试题。</p>
           ) : null}
           {view === 'mindmap' && mindmap ? (
-            <div className="mindmap">
-              <ul>
-                {mindmap.nodes.map((node) => (
-                  <li key={node.id} style={{ marginLeft: `${node.level * 24}px` }}>
-                    {node.label}
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <MindmapDiagram graph={mindmap} />
           ) : view === 'mindmap' ? (
             <p>尚未生成思维导图。</p>
           ) : null}

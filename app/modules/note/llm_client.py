@@ -7,6 +7,7 @@ from typing import Any, Optional, Tuple
 from dotenv import load_dotenv
 
 from app.storage.settings_store import get_llm_settings
+from app.utils.logger import logger
 
 # Load environment variables early so CLI usage works.
 load_dotenv(dotenv_path=".env.txt")
@@ -99,16 +100,37 @@ def _embedding_model_factory(
                 "langchain-openai is required when LLM_PROVIDER='openai'. "
                 "Install it with `pip install langchain-openai openai`."
             )
-        kwargs = {"model": embedding_model_name, "openai_api_key": api_key}
+        
+        # 构建参数，包括更长的超时时间
+        kwargs = {
+            "model": embedding_model_name,
+            "openai_api_key": api_key,
+            "request_timeout": 180.0,  # 3分钟超时
+            "max_retries": 2,  # 允许重试2次
+        }
         if base_url:
             kwargs["openai_api_base"] = base_url
-        return OpenAIEmbeddings(**kwargs)
+        
+        logger.info(
+            f"初始化 OpenAI Embedding 模型: model={embedding_model_name}, "
+            f"base_url={base_url or 'default'}, timeout=180s"
+        )
+        
+        try:
+            embeddings = OpenAIEmbeddings(**kwargs)
+            logger.info(f"✅ Embedding 模型初始化成功: {embedding_model_name}")
+            return embeddings
+        except Exception as e:
+            logger.error(f"❌ OpenAI Embedding 初始化失败: {e}")
+            # 不自动降级，让用户明确知道问题
+            raise
 
     if GoogleGenerativeAIEmbeddings is None:
         raise ImportError(
             "langchain-google-genai is required when LLM_PROVIDER='google'. "
             "Install it with `pip install langchain-google-genai google-generativeai`."
         )
+    logger.info(f"初始化 Google Embedding 模型: model={embedding_model_name}")
     return GoogleGenerativeAIEmbeddings(model=embedding_model_name, google_api_key=api_key)
 
 
@@ -116,16 +138,21 @@ def get_embedding_model():
     overrides = get_llm_settings()
     provider = _resolve_provider(overrides)
     llm_model, embedding_model = _resolve_models(overrides, provider)
+    
+    logger.info(f"获取 Embedding 模型: provider={provider}, model={embedding_model}")
+    
     if provider == "openai":
         api_key = _resolve_openai_api_key(overrides)
         base_url = _resolve_openai_base_url(overrides)
         _set_env_if_needed("OPENAI_API_KEY", api_key)
         if base_url:
             _set_env_if_needed("OPENAI_API_BASE", base_url)
+        logger.debug(f"OpenAI 配置: base_url={base_url}, api_key={'***' + api_key[-4:] if api_key else 'None'}")
     else:
         api_key = _resolve_google_api_key(overrides)
         _set_env_if_needed("GOOGLE_API_KEY", api_key)
         base_url = None
+    
     return _embedding_model_factory(provider, embedding_model, base_url, api_key)
 
 

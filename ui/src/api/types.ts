@@ -50,10 +50,14 @@ export interface OutlineNode {
   anchors: AnchorRef[];
   children: OutlineNode[];
   level: number;
+  pages?: number[];
+  page_start?: number;
+  page_end?: number;
 }
 
 export interface OutlineTree {
   root: OutlineNode;
+  markdown?: string;
 }
 
 export interface NoteFigure {
@@ -73,6 +77,8 @@ export interface NoteSection {
   figures: NoteFigure[];
   equations: NoteEquation[];
   refs: string[];
+  level?: number;
+  children?: NoteSection[];
 }
 
 export interface NoteDoc {
